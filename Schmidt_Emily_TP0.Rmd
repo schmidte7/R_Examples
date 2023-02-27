@@ -1,0 +1,193 @@
+---
+title: "TP_0_Exercise"
+author: "Emily Schmidt"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE,nmessage=FALSE, warning=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+rm(list = ls())
+```
+
+```{r Package, echo=FALSE, include=FALSE, message=FALSE, warning=FALSE}
+library(fpp3)
+```
+
+**Exercise 3**: Time series visualization. Part 2.  
+
+1. Create time plots of the following four time series: Bricks from aus_production, Lynx from pelt,
+Close from gafa_stock, Demand from vic_elec.  
+
+(a) Use ? (or help()) to find out about the data in each series.
+
+(b) Modify the axis labels and titles if needed.
+
+(c) Can you identify any unusual observations?  
+**Please refer to the individual charts for a response related to (c).**  
+
+• Trend: A long-term increase or decrease in the data; a “changing direction”.  
+
+• Seasonality: A seasonal pattern of a fixed and known period. If the frequency is unchanging and associated with some aspect of the calendar, then the pattern is seasonal.  
+
+• Cycle: A rise and fall pattern not of a fixed frequency. If the fluctuations are not of a fixed frequency then they are cyclic.  
+
+• Seasonal vs Cyclic: Cyclic patterns are longer and more variable than seasonal patterns in general.  
+
+*Source*: https://www.r-bloggers.com/2020/10/how-to-visualize-time-series-data-tidy-forecasting-in-r/ 
+
+*Description*: Quarterly estimates of selected indicators of manufacturing production in Australia.  
+
+```{r AUS Help, echo=FALSE, include=TRUE, message=FALSE, warning=FALSE}
+help("aus_production")
+```
+
+```{r AUS Explore, echo=FALSE, include=TRUE, message=FALSE, warning=FALSE}
+aus_production
+
+# 218 rows
+# 7 exploratory variables 
+
+interval(aus_production)
+# Intervals by quarter
+```
+```{r AUS Bricks Plot, echo=FALSE, include=TRUE, message=FALSE, warning=FALSE}
+aus_production |> autoplot(Bricks) + labs(title = "Australian Brick Commodity", y = "Clay by Production (MM)")
+```
+
+**(c)** According to the time series above for Australian bricks, there appears to be an unusual observation around 1984 when the production dropped from ~550MM to 300MM. Once this drastic decrease occurred, the commodity manufacturing turned a corner and started its gradual increase that almost returned the amount of bricks produced to the highest level around the 1980. Then, production started to decline once again. Later, we will attempt to dive deeper to see why/how this dip occurred as there seems to be cycle every five years.
+
+```{r AUS Bricks Additional, echo=FALSE, include=TRUE, message=FALSE, warning=FALSE}
+aus_production |> gg_season(Bricks) + labs(title = "AUS Production (Bricks) Seasonality") # Wraps seasonal period over the x-axis
+
+aus_production |> gg_subseries(Bricks) + labs(title = "AUS Production (Bricks) Subseries") #  Isolates seasonal periods into separate plots
+aus_production |> gg_lag(Bricks, geom = "point") + labs(title = "AUS Production (Bricks) Lagged") # A lag plot shows the time series against lags of itself. It is often colored the seasonal period to identify how each season correlates with others.
+aus_production |> ACF(Bricks) |>  autoplot() + labs(title = "AUS Production (Bricks) ACF", y = "ACF") #  Investigating the patterns in a time series is to decompose it into components
+```
+
+*Description*: Hudson Bay Company trading records for Snowshoe Hare and Canadian Lynx furs from 1845 to 1935. This data contains trade records for all areas of the company.  
+
+```{r Pelt Help, echo=FALSE, include=TRUE, message=FALSE, warning=FALSE}
+help("pelt")
+```
+
+```{r Pelt Explore, echo=FALSE, include=TRUE, message=FALSE, warning=FALSE}
+pelt
+
+# 91 rows
+# 3 exploratory variables 
+
+interval(pelt)
+# Intervals by year
+```
+```{r Pelt Lynx Plot, echo=FALSE, include=TRUE, message=FALSE, warning=FALSE}
+pelt |> autoplot(Lynx) + labs(title = "Canadian Lynx Pelts Traded") + labs(y= "Number of Pelts")
+```
+
+**(c)** From 1845 to 1935, the Hudson Bay Company publicized their trading records for two types of furs, Hare and Lynx. The Canadian Lynx pelts trend is shown above. Since there are consistent mountains and valleys throughout the data, nothing appears to be completely unusual. The one observation worth mentioning though is where there are a relatively flat number of trading records around 1875. This does not appear in any of the other positive trending peaks. Additional details will be discussed in question **2.**
+
+```{r Pelt Lynx Additional, echo=FALSE, include=TRUE, message=FALSE, warning=FALSE}
+#pelt |> gg_season(Lynx) + labs(title = "Pelt Lynx Seasonality") # Wraps seasonal period over the x-axis
+
+pelt |> gg_subseries(Lynx) + labs(title = "Pelt Lynx Subseries") #  Isolates seasonal periods into separate plots
+pelt |> gg_lag(Lynx) + labs(title = "Pelt Lynx Lagged") # A lag plot shows the time series against lags of itself. It is often colored the seasonal period to identify how each season correlates with others.
+pelt |> ACF(Lynx) |>  autoplot() + labs(title = "Pelt Lynx ACF", y = "ACF") #  Investigating the patterns in a time series is to decompose it into components
+```
+
+*Description*: Historical stock prices from 2014-2018 for Google, Amazon, Facebook and Apple. All prices are in $USD.  
+
+```{r Gafa Help, echo=FALSE, include=TRUE, message=FALSE, warning=FALSE}
+help("gafa_stock")
+```
+
+```{r Gafa Explore, echo=FALSE, include=TRUE, message=FALSE, warning=FALSE}
+gafa_stock
+
+# 5,032 rows
+# 8 exploratory variables 
+# 4 key
+
+interval(gafa_stock)
+# Intervals by 'missing some dates' -> undefined
+```
+
+```{r Gafa Close Plot, echo=FALSE, include=TRUE, message=FALSE, warning=FALSE}
+gafa_stock |> autoplot(Close) + labs(title = "GAFA Closing Stock Prices", y = "Close ($, USD)")
+```
+
+**(c)** GAFA stands for Google, Apple, Facebook, and Amazon. The data provided above are historical closing stock prices for each corporation from 2014 to 2018. Other than the Amazon's larger closing price increase from 4Q 2017 to 3Q 2018 (when it surpassed `GOOG`), there are no unusual observations at this time that are worth mentioning. In order to analyze if there are irregular data points, the graph's scale may need to be reduced to monthly intervals and an individual review of each company will need to be conducted to analyze possible changes in closing price around any of the peaks and/or dips.
+
+```{r gafa Close AAPL Additional, echo=FALSE, include=TRUE, message=FALSE, warning=FALSE}
+gafa_stock |> filter(Symbol == "AAPL") |> gg_season(Close) + labs(title = "Apple Seasonality") # Wraps seasonal period over the x-axis
+gafa_stock |> filter(Symbol == "AAPL") |> ACF(Close) |>  autoplot() + labs(title = "Apple ACF", y = "ACF") #  Investigating the patterns in a time series is to decompose it into components
+```
+
+```{r gafa Close AMZN Additional, echo=FALSE, include=TRUE, message=FALSE, warning=FALSE}
+gafa_stock |> filter(Symbol == "AMZN") |> gg_season(Close)+ labs(title = "Amazon Seasonality") # Wraps seasonal period over the x-axis
+gafa_stock |> filter(Symbol == "AMZN") |> ACF(Close) |>  autoplot() + labs(title = "Amazon ACF", y = "ACF") #  Investigating the patterns in a time series is to decompose it into components
+```
+
+```{r gafa Close FB Additional, echo=FALSE, include=TRUE, message=FALSE, warning=FALSE}
+gafa_stock |> filter(Symbol == "FB") |> gg_season(Close) + labs(title = "Facebook Seasonality") # Wraps seasonal period over the x-axis
+gafa_stock |> filter(Symbol == "FB") |> ACF(Close) |>  autoplot() + labs(title = "Facebook ACF", y = "ACF")#  Investigating the patterns in a time series is to decompose it into components
+```
+```{r gafa Close GOOG Additional, echo=FALSE, include=TRUE, message=FALSE, warning=FALSE}
+gafa_stock |> filter(Symbol == "GOOG") |> gg_season(Close) + labs(title = "Google Seasonality") # Wraps seasonal period over the x-axis
+gafa_stock |> filter(Symbol == "GOOG") |> ACF(Close) |>  autoplot() + labs(title = "Google ACF", y = "ACF") #  Investigating the patterns in a time series is to decompose it into components
+```
+
+*Description*: `vic_elec` is a half-hourly tsibble with three values:  
+• Demand:	Total electricity demand in MWh.  
+• Temperature:	Temperature of Melbourne (BOM site 086071).  
+• Holiday:	Indicator for if that day is a public holiday.  
+
+```{r Elec Help, echo=FALSE, include=TRUE, message=FALSE, warning=FALSE}
+help("vic_elec")
+```
+
+```{r Elec Explore, echo=FALSE, include=TRUE, message=FALSE, warning=FALSE}
+vic_elec
+
+# 52,608 rows
+# 5 exploratory variables 
+
+interval(vic_elec)
+# Intervals by 30 minutes
+```
+
+```{r Elec Demand Plot, echo=FALSE, include=TRUE, message=FALSE, warning=FALSE}
+vic_elec |> autoplot() + labs(title = "Half-hourly Electricity Demand", y = "Total Electricity (MWh)")
+```
+
+**(c)** The last data set provides information on Victoria's half-hourly electricity demand in Australia. From 2012 through 2014, there is a decent amount of fluctuation from the beginning of the years into what appears to be close to the end of 1Q. Since there is a pattern throughout each year, it is hard to tell if there are any unique observations since seasonality appears to be driving those high peaks and constant directional changes. If there were an unusual data point, the data would need to be more granular (per year, weekly, etc.)
+
+```{r Elec Demand Additional, echo=FALSE, include=TRUE, message=FALSE, warning=FALSE}
+vic_elec |> gg_season(Demand, period = "year") +
+  labs(y="MWh", title="Yearly Electricity Demand") # Seasonal plot showing yearly seasonal patterns for Victorian electricity demand (book: 2.4 Seasonal plots)
+
+vic_elec |> gg_season(Demand, period = "month") +
+  labs(y="MWh", title="Monthly Electricity Demand") # Seasonal plot showing monthly seasonal patterns for Victorian electricity demand
+
+vic_elec |> gg_season(Demand, period = "week") +
+  theme(legend.position = "none") +
+  labs(y="MWh", title="Weekly Electricity Demand") # Seasonal plot showing weekly seasonal patterns for Victorian electricity demand (book: 2.4 Seasonal plots)
+
+vic_elec |> gg_season(Demand, period = "day") +
+  theme(legend.position = "none") +
+  labs(y="MWh", title="Daily Electricity Demand") # Seasonal plot showing daily seasonal patterns for Victorian electricity demand (book: 2.4 Seasonal plots) |> 
+
+vic_elec |> ACF(Demand) |>  autoplot() + labs(title = "Demand ACF", y = "ACF") #  Investigating the patterns in a time series is to decompose it into components
+
+#vic_elec |> filter(yearmonth(Time) == yearmonth("2012")) |> autoplot() + labs(title = "Year: 2012") # Select one month only, daily and weekly fluctuations 
+
+#vic_elec |> filter(yearmonth(Time) == yearmonth("2013")) |> autoplot() + labs(title = "Year: 2013") # Select one month only, daily and weekly fluctuations 
+
+#vic_elec |> filter(yearmonth(Time) == yearmonth("2014")) |> autoplot() + labs(title = "Year: 2014") # Select one month only, daily and weekly fluctuations 
+```
+
+2. What can you conclude? Provide detailed comment on each time series based on your plots.  
+• `aus_production` (Bricks): For about 20 years after 1960, there continued to be an increasing trend of brick production in Australia. Then, there was a disruption around 1984 that caused the manufacturing to drastically fall by 250 million bricks which in turn created a decreasing trend. Even though this decline was the largest drop throughout this time period, there appears to be a cyclic component. About every five years, there is an upward trend that then changes direction of the amount of bricks produced. In the *AUS Production (Bricks) Seasonality* graph, "data are plotted against the individual 'seasons' in which the data are observed." The production levels were lowest in the 1960s and highest throughout 1970s to 1980s. Throughout the 2000s, production levels of bricks hovered around 400 million. This could be caused by when the houses/buildings were being built and then what season builders began their construction. This could be assumed to be the warmer months in Australia so that the ground is not frozen solid. Next, the subseries plots emphasize the slight "seasonal patterns where the data for each season are collected together in separate mini time plots." The blue line within each of the quarters indicates the mean. The trend within each quarter appears to be similar, in the fact that there is an constant increase until there is a decent amount of fluctuation a little after 1970. The production levels continue to increase from 1Q to 3Q but then ramps down in Q4. This could be due to the weather, holidays, economic factors, etc. The last two plots are lagged scatter plots and autocorrelation. Within the *AUS Production (Bricks) Lagged* graph, the relationship is positive and strongest at lag 1. All others are positive as well but have a weaker relationship reflecting a less strong seasonality in the data. For example, Q1 (purple) appears to be less linear than other quarters in terms of the amount of bricks produced within that time period.  Last but not least, lag 4 within the ACF chart is higher than all other lags. This is due to "due to the seasonal pattern in the data: the peaks tend to be four quarters apart and the troughs tend to be four quarters apart." "The slow decrease in the ACF as the lags increase is due to the trend, while the 'scalloped' shape is due to the seasonality." Additionally, there are no negative lags. All correlations appear to not be significantly different from zero either.  
+• `pelt` (Lynx): In a 90-year time span, the trend appears to be relatively flat and the cyclic nature of the data will fluctuate with a mean of a little less than 30,000 traded pelts. When referring to seasonality, it would appear to be almost nonexistent. The data can not be broken down further than years so that is why the *Pelt Lynx Subseries* has only one graph compared to be broken out in a more granular metric. The *Pelt Lynx Lagged* charts show how there are very weak relationships as none appear to be linear. Additionally, the ACF correlogram  measures the "linear relationship between lagged values of a time series." The cyclic patterns are longer and it may not be apparent that there is seasonality or a true trend other than constant.  A subject matter expert would be able to share their expertise to share why that occurs.  
+• `gafa_stock` (Close): As stated before, there are four corporations within the GAFA data. To understand each company and what is happening with the time series, it makes logical sense to separate each entity into its own Closing vs. Time time series. Before that occurs though, let's review the *GAFA Closing Stock Prices*. `AAPL` and `FB` compared to `GOOG` and `AMZN` have much lower closing prices. Although `GOOG` was higher than all other companies prior to mid-2016, `AMZN` than became the closing price leader. As all of the entities appear to have a positive trend, all face the same hardship around mid-2018 when there appears to be a decline. This decreasing trend can be seen within the individual *Seasonality* and *ACF* charts. Even when looking at the data for each entity by month, none appear to have seasonality as all years "bounce all over." Instead, there are certain aspects that can be seen. For Apple and Amazon, there closing prices starts to drop around October while Facebook and Google started earlier around August/September. For Facebook specifically though, it has the most drastic decline compared to the other three companies in 2018. For the remaining years (2014 through 2017), most of the trends were increasing over time but there were incidents like with Amazon where in 2014 the trend seemed to be steadily decreasing. Within all of the ACF graphs, there is a slow decrease  as the lag increases which explains the trend component but not seasonality.  
+• `vic_elec` (Demand): In the middle of each year, there appears to be higher demand which would be around Australia's winter months. Therefore, using more electricity to heat your home or office building could align with what the data is showing. Additionally, there are other peaks around the beginning and end of each year which could be due to the holidays. If one reviews the *Yearly Electricity Demand* chart though, that same volatility is seen as seasonality. This time of the year, individuals would most likely be cooling off their homes due to the warmer months. The dips would represent the time of the year that the temperatures are moderate enough to open windows to cool off. To dive a bit deeper, there are other charts that show monthly, weekly, and even daily. The common theme between those three is that it appears that 2014 has been using more electricity than past years. For instance, his may be due to more individuals buying more items that need power or the gradual impact of global warming. Additionally, between August 2013 and July 2014, the amount of electricity used seems to be much higher, but an expert or more research would need to be conducted to find that answer. In the ACF chart, it is a little unclear how to interpret this chart. The ends of the chart are much higher than the middle which includes negative values, which should represent the overall seasonality of how the beginning and end of the year are higher while the middle has less demand.
+
