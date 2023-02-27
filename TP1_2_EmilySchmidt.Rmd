@@ -1,0 +1,241 @@
+---
+title: "Exercise2_TP1"
+author: "Emily Schmidt"
+date: '2022-10-23'
+output:
+  
+  html_document: default
+  pdf_document: default
+  number_sections: true
+  theme:
+    bootswtch: solar
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r, message=FALSE, warning=FALSE}
+library(data.table) # Fast aggregation of large data sets and a fast file reader
+library(lubridate) # Commute date-times
+library(ggplot2) # Provides helpful commands to create complex plots from data in a data frame
+library(reshape2) # Easily transform our data into whatever structure we may need
+library(dplyr) # Data manipulation operations such as applying filter
+library(tidyr) # Contains tools for changing the shape and hierarchy of a data set
+library(caret) # Functions that attempt to streamline the process for creating predictive models
+library(corrplot) # Graphical display of a correlation matrix, confidence interval or general matrix
+library(lattice) # An implementation of Trellis graphics 
+library(RColorBrewer) # Tool to manage colors 
+```
+
+## Problem 4.1 - Breakfast Cereals
+
+### Preliminary data exploratory:
+
+```{r, message=FALSE, warning=FALSE}
+setwd("C:\\Users\\emann\\GSEM Master\\Data Mining\\Homework 1") # Set directory
+getwd() # Check the working directory
+
+Cereal <- fread("Cereals.csv", sep = ",", header = T) # Load your data, Cereals.csv
+```
+
+```{r}
+dim(Cereal) # Get or set the dimension of the specified matrix, array or data frame
+head(Cereal) # Display the first n rows present in the input data frame
+View(Cereal) # Invoke a spreadsheet-style data viewer within RStudio
+summary(Cereal) # Produce result summaries of the results of various model fitting functions
+str(Cereal) # Compactly displaying the internal structure of a R object
+
+ which(is.na(Cereal)) # Function returns the positions with missing values
+sum(is.na(Cereal))  # Sum the total amount of missing values in the data set
+Cereals <- na.omit(Cereal) # Remove the missing values
+summary(Cereals) # Call the data set to ensure that missing values are removed
+
+```
+One of the most important parts of analyzing your data is to conduct a preliminary exploratory review. The following points outline high-level conclusions:  
+- There are 77 observations and 16 variables within the raw data set  
+- There is information on rating, shelf height, cereal name, and cereal features
+- When calling summary() and str(), we notice there are missing values and various types of variables (chr, int, and num)  
+- Diving deeper into the missing values, there are 4 NAs. Therefore, we omit. 
+
+**A**. *Which variables are quantitative/numerical? Which are ordinal? Which are nominal?*
+
+Quantitative variables:  
+- calories, protein, fat, sodium, fiber, carbo, sugars, potass, vitamins, weight, cups, and rating
+
+Categorical variables (N/O):  
+- N: name, mfr, and type  
+- O: shelf
+
+**B**. *Compute the mean, median, min, max, and standard deviation for each of the quantitative variables.*
+
+```{r}
+# Takes a list/vector/data frame as an input and gives an output in a vector or matrix for a defined function (ex. mean)
+sapply(Cereals[,c(4:12, 14:16)], mean, na.rm = T)  
+sapply(Cereals[,c(4:12, 14:16)], median, na.rm = T)
+sapply(Cereals[,c(4:12, 14:16)], min, na.rm = T)
+sapply(Cereals[,c(4:12, 14:16)], max, na.rm = T)
+sapply(Cereals[,c(4:12, 14:16)], sd, na.rm = T)
+
+# Better way to show the summary statistics in an organized table
+# Create a summary statistics table to show metrics, ensuring that missing values are not included
+CSUM <- data.frame(mean = sapply(Cereals[,c(4:12, 14:16)], mean,na.rm = T) 
+                ,median = sapply(Cereals[,c(4:12, 14:16)], median,na.rm = T)
+                ,min = sapply(Cereals[,c(4:12, 14:16)], min,na.rm = T)
+                ,max = sapply(Cereals[,c(4:12, 14:16)], max,na.rm = T)
+                ,sd = sapply(Cereals[,c(4:12, 14:16)], sd,na.rm = T))
+colnames(CSUM) = c("Mean","Median","Min","Max","Standard Deviation")
+CSUM
+```
+Within the 12 quantitative variables, the mean, median, min, max, and standard deviation all differ. This is in part due to their scaling. For example, sodium and weight are not comparable unless normalized since you have a scale ranging from 0 to 320 while the other weight is 0.5 to 1.5. Another observation is the standard deviation. Three variables have a much more dispersed in relation to the mean than other variables.
+
+**C**. *Use R to plot a histogram for each of the quantitative variables. Based on the histograms and summary statistics, answer the following questions:*
+
+```{r}
+Cereals %>% gather() %>% head() # Reshaping the data which means it collects a set of column names and places them into a single “key” column
+
+q_data <- na.omit(Cereals[,c(4:12, 14:16)]) # Removes the missing variables from the quantitative columns
+
+ggplot(gather(data = q_data),aes(value)) +
+  geom_histogram(bins = 10, color = "white") + # Creates bin sizing and sets the lines as white
+  facet_wrap(~key,scales = "free") + # Converting the graphs into panels
+  ggtitle("Quantitative Variable Analysis") + # Title name
+  ylab("Count") + xlab("Value") + # Label names
+  theme_classic() # A classic theme, with x and y axis lines and no grid lines
+```
+
+**i.** *Which variables have the largest variability?* 
+Out of the 12 variables, sodium and potass have the largest variability as they range from 0 to 300+. Another two variables that seem to fall under this category was vitamins and calories due to another analysis of reviewing their var().
+
+**ii.** *Which variables seem skewed?*
+Visually, one will notice that a majority of the histograms are skewed right, meaning that they are positively skewed. On the other hand, there are several variables that are negative/skewed left (cups, sodium, and, calories). The variables that seem to be skewed the most are fiber and fat.
+
+**iii.** *Are there any values that seem extreme?*
+Within the 12 charts, I believe there are several outliers that can be identified by visually reviewing each variable. For instance, fiber, protein, weight, and vitamins all have values that are distant from other data points. If we were to calculate the outliers position compared to the mean, one might also say that the following charts may have outliers present: calories, cups, and sodium.
+
+**D**. *Use R to plot a side-by-side boxplot comparing the calories in hot vs cold cereals. What does this plot show us?*
+
+```{r}
+#cal_type.box <- ggplot(data = Cereals,aes(x = type, y = calories, fill = type)) + # Call the ggplot to begin creating the visualization
+  #geom_boxplot() + # Type of graph generated
+  #ggtitle("Distirbution of Cereal Types") + # Title name
+  #ylab("Calorie Count") + xlab("Type of Cereal")  + # Label names
+  #stat_boxplot(geom = 'errorbar', linetype=1, width=0.5) +  # Allows you to see the outliers beyond the minimum and maximum
+  #stat_summary(fun = "mean") + # fun.y could also equal min or max to see their position
+  #theme_classic() # Clean background behind the graph
+
+#cal_type.box
+
+# Create a box plot analyzing the calories vs type with graph characteristics
+boxplot(calories~type, data = Cereals, main = "Distirbution of Cereal Types", # Title names
+        xlab = "Type of Cereal",ylab = "Calorie Count", # Label names
+        col = "black",medcol = "red",boxlty = 0,border = "black", # Changing the style of the box plot
+        whisklty = 1,staplelwd = 1,outpch = 1,outcex = 1,outcol = "black") # Changing the style of the box plot
+
+```
+
+The boxplot shows how the types of cereals are distributed. We can visually see that 'hot' does not have many data points as the mean, minimum and maximum are all centered around the red and black lines (overlayed) shown to the right. If we review the data table, there are only three 'hots' present. On the other hand, 'cold' cereals' median and mean are greater than the 'hot' type. The overall range of 'cold cereals' is larger. This shows that customers prefer and will choose 'cold' cereal over 'hot.'
+
+**E**. *Use R to plot a side-by-side boxplot of consumer rating as a function of the shelf height. If we were to predict consumer rating from shelf height, does it appear that we need to keep all three categories of shelf height?*
+
+```{r}
+# Create a box plot analyzing the ratings vs shelf height with graph characteristics
+boxplot(rating~shelf, data = Cereals, main = "Impact of Shelf Size on Customer Ratings", # Title Name
+        xlab = "Ratings", ylab = "Shelf", # Label names
+        col = "black",medcol = "red", boxlty = 0,border = "black", # Changing the style of the box plot
+        whisklty = 1,staplelwd = 1,outpch = 1,outcex = 1,outcol = "black") # Changing the style of the box plot
+```
+
+My suggestion would be to investigate the data further to make such a conclusion. There is no statistical evidence to claim which shelf we should remove or keep. If we were to just visually look at the box plots though, I would assume that the second shelf would be removed since its mean rating is lower than 1 and 3.
+
+**F.** *Compute the correlation table for the quantitative variable (function cor()). In addition, generate a matrix plot for these variables (function plot(data)).*
+
+
+```{r}
+q_data <- na.omit(Cereals[,c(4:12, 14:16)]) # Removes the missing variables from the quantitative columns
+
+cormat <- round(cor(q_data),2) # Round the correlation coefficient to two decimal places
+head(cormat) # Display the first n rows present in the input data
+melted_cormat <- melt(cormat) # One way to reshape and elongate the data frame
+head(melted_cormat) # Display the first n rows present in the input data
+
+# Create correlation matrix (tiles) with the rounded correlation coefficient 
+ggplot(data = melted_cormat, aes(x = Var1, y = Var2, fill = value)) + 
+  geom_tile() +
+  geom_text(aes(Var2, Var1, label = value), color = "black", size = 2)
+
+# Get upper triangle of the correlation matrix
+  get_upper_tri <- function(cormat){ 
+    cormat[lower.tri(cormat)]<- NA
+    return(cormat)
+  }
+
+# Rename the correlation coefficient value
+upper_tri <- get_upper_tri(cormat)
+upper_tri
+
+# Use correlation between variables as distance
+reorder_cormat <- function(cormat){ 
+dd <- as.dist((1-cormat)/2)
+hc <- hclust(dd)
+cormat <-cormat[hc$order, hc$order]
+}
+
+# Reorder the correlation matrix
+cormat <- reorder_cormat(cormat)
+upper_tri <- get_upper_tri(cormat)
+
+# Melt the correlation matrix
+melted_cormat <- melt(upper_tri, na.rm = TRUE)
+
+# Create a ggheatmap with multiple characteristics 
+ggheatmap <- ggplot(melted_cormat, aes(Var2, Var1, fill = value)) +
+  geom_tile(color = "white") +
+  scale_fill_gradient2(low = "blue", high = "red", mid = "white", midpoint = 0, limit = c(-1,1), space = "Lab", name="Pearson\nCorrelation") +
+  ggtitle("Correlation Heatmap") + # Title name
+  theme_minimal() + # Minimal theme, keeps in the lines
+  theme(axis.text.x = element_text(angle = 45, vjust = 1, size = 12, hjust = 1)) +
+  coord_fixed() +
+  geom_text(aes(Var2, Var1, label = value), color = "black", size = 2)
+
+# Print the heat map
+print(ggheatmap)
+```
+
+**i.** *Which pair of variables is the most strongly correlated?*   
+There are three correlations that stick out in the matrix below:  
+- fiber and potass at a correlation of 0.91  
+- sugar and ratings have a negative correlation at -0.76  
+- calories and weight have a positive correlation at 0.70  
+All other correlations do not have as strong of a relation between one another and not worth mentioning at this point in the analysis.
+
+**ii.** *How can we reduce the number of variables based on these correlations?*  
+Based on our quantitative variables, we can utilize the method of PCA. This will allow us to reduce the number of variables while making the maximum use of their unique contributions to the overall variation because variation in one variable is duplicated by similar variation in the other variable. In order to perform this method, one needs to find a linear combination of the two variables that contains most of the information so that the new variable can replace the two original ones.  - Source: Data Mining textbook
+
+**iii**. *How would the correlations change if we normalized the data first?*
+```{r}
+pcs.cor <- prcomp(na.omit(Cereals[,-c(1:3)])) # Compute PCs data set
+
+summary(pcs.cor) # Review the summary of those values
+# 96% of the total variation associated with all 13 of the original variables is captured in the first three components
+
+pcs.cor$rot[,1:5]
+
+pcs.cor <- prcomp(na.omit(Cereals[,-c(1:3)]), scale. = T) # Compute PCs data set
+summary(pcs.cor)
+
+pcs.cor$rot[,1:5]
+# Now we find that we need 7 principal components to account for more than 90% of the total variability. The first 2 principal components account  for only 52% of the total variability, and thus reducing the number of variables to two would mean losing a lot of information.
+
+normCereal = preProcess(Cereals[,4:16],method = c("center","scale"),na.rm = T) # Estimates the required parameters for each operation and predict 
+NormcmCereal = predict(normCereal,Cereals[,4:16]) # predict the values based on the input data
+
+cmCereal2 = cor(NormcmCereal,use = "complete.obs")
+round(cmCereal2,2) # Round function to two decimals
+
+corrplot(cmCereal2, type = "lower", main = "Normalized Correlation Matrix", mar=c(0,0,1,0), tl.cex=0.8, tl.col="black", tl.srt=45, addCoef.col = "black", number.cex = 0.7, col=brewer.pal(n=8, name="PuOr")) # brewer.pal came from the library RColorBrewer
+
+```
+
+If we normalize the data, that means that we are adjusting for the different scales. Once we perform PCA, we can see how prior to normalization, it only took three variables to explain the total variation associated with all 13 variables at 96%. Afterwards, it fell to 90% after accounting for seven variables. Overall though, when speaking about the effect on correlation, the Correlation Heatmap against the Normalized Correlation Matrix appear to be equivalent after normalizing.
+

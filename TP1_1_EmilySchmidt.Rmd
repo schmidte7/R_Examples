@@ -1,0 +1,419 @@
+---
+title: "Exercise1_TP1"
+author: "Emily Schmidt"
+date: '2022-10-23'
+output: html_document
+---
+
+### Problem 3.4 - Laptop Sales at a London Computer Chain: Interactive Visualization  
+The file LaptopSales.txt is a comma-separated file with nearly 300,000 rows. ENBIS (the European Network for Business
+and Industrial Statistics) provided these data as part of a contest organized in the fall of 2009.  
+**Scenario**: Imagine that you are a new analyst for a company called Acell (a company selling laptops). You have been provided with data about products and sales. You need to help the company with their business goal of planning a product strategy and pricing policies that will maximize Acell’s projected revenues in 2009. 
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r, message=FALSE, warning=FALSE}
+library(data.table) # Fast aggregation of large data sets and a fast file reader
+library(lubridate) # Commute date-times
+library(ggplot2) # Provides helpful commands to create complex plots from data in a data frame
+library(reshape2) # Easily transform our data into whatever structure we may need
+library(dplyr) # Data manipulation operations such as applying filter
+library(tidyr) # Contains tools for changing the shape and hierarchy of a data set
+library(caret) # Functions that attempt to streamline the process for creating predictive models
+library(corrplot) # Graphical display of a correlation matrix, confidence interval or general matrix
+library(lattice) # An implementation of Trellis graphics 
+library(tidyverse) # Transform data
+library(scales) # How to normalize data
+library(ggmap) # Maps visualizations
+library(osmdata) # Open street maps
+library(sp) # Spatial data
+library(rgdal) # Needed due to error with the map
+library(UpSetR) # Creates visualizations of intersecting sets using a novel matrix design, along with visualizations of several common set
+library(forcats) # Need to use fct_infreq in a bar chart to sort
+library(cowplot) # Arrange plots into a grid and label them
+```
+
+### Preliminary data exploratory:
+```{r}
+setwd("C:\\Users\\emann\\GSEM Master\\Data Mining\\Homework 1") # Set directory
+getwd() # Check the working directory
+
+Laptops <- fread("LaptopSales_red.csv", sep = ",", header = T) # Load your data, Cereals.csv
+
+dim(Laptops) # Get or set the dimension of the specified matrix, array or data frame
+head(Laptops) # Display the first n rows present in the input data frame
+View(Laptops) # Invoke a spreadsheet-style data viewer within RStudio
+summary(Laptops) # Produce result summaries of the results of various model fitting functions
+str(Laptops) # Compactly displaying the internal structure of a R object
+
+head(which(is.na(Laptops))) # Function returns the positions with missing values
+sum(is.na(Laptops))  # Sum the total amount of missing values in the data set
+Laptops <- na.omit(Laptops) # Remove the missing values
+summary(Laptops) # Call the data set to ensure that missing values are removed
+```
+One of the most important parts of analyzing your data is to conduct a preliminary exploratory review. The following points outline high-level conclusions:  
+- There are 148,786 observations and 17 variables within the raw data set   
+- There is information on date, configuration, customer/store location, and laptop features  
+- When calling summary() and str(), we notice there are missing values and various types of variables (chr, int, and num)  
+- Diving deeper into the missing values, there are 6,826 NAs. Therefore, we omit. When recalling summary(), there now should be a total of 142,049 observations that will we proceed with using throughout this analysis.  
+
+**A** - Price Questions:   
+**i.** *At what price are laptops actually selling?*
+```{r}
+summary(Laptops$Retail.Price) # Produce result summaries of the Retail.Price 
+
+# Histogram shows the distribution of the outcome variable
+rp.hist <- ggplot(Laptops, aes(x = Retail.Price)) +
+  geom_histogram(color="white", fill="black",binwidth = 40, linetype = "dashed") + # Graph design
+  ggtitle("Distirbution of Retail Price") + # Title name
+  ylab("Count") + xlab("Retail Price")  + # Label names
+  theme(plot.title = element_text(size=50)) + # Title text size
+  theme_classic(base_size = 8) # Elongating the graph to show all values
+
+rp.hist
+
+#Box plot shows the distribution quartiles, min, max, median, etc.
+rp.box <- ggplot(Laptops, aes(x="", y=Retail.Price)) + 
+  geom_boxplot(outlier.shape = 1, fill = "NA") +
+  stat_boxplot(geom ='errorbar', width = .5) + # Added the horizontal bars for visualization
+  ggtitle("Distirbution of Retail Price") + # Title name
+  ylab("Count") + xlab("Retail Price")  + # Label names
+  stat_summary(fun="mean",color="red",geom = "errorbar", aes(ymax = ..y.., ymin = ..y..), linetype = "dashed", size = 1) + # Show difference between mean and median
+  theme(plot.title = element_text(size=50)) + # Title text size
+  theme_classic(base_size = 8) # Elongating the graph to show all values
+
+rp.box
+
+min(Laptops$Retail.Price) # Calculate minimum
+max(Laptops$Retail.Price) # Calculate maximum
+mean(Laptops$Retail.Price) # Calculate mean
+median(Laptops$Retail.Price) # Calculate median
+```
+
+The retail prices range from under $200 to over $850, averaging around $508. Customers typically will purchase a laptop that is slightly under $500 though. Overall, both the histogram and the box plot assume to be normally distributed. Outside of the minimum and maximum values, one can see the numerous outliers that are present within the data.
+
+**ii.** *Does price change with time?* 
+```{r, message=FALSE, warning=FALSE}
+Dates <- as.Date(Laptops$Date, "%m/%d/%Y") # Transform the date into M-D-Y
+tab = data.frame(Dates,Laptops$Retail.Price) # Store new Date and Retail.Price
+
+tab$Month = as.Date(cut(Dates,breaks = "month")) # Divide the Date into different ranges - months in this case
+head(tab$Month) # Display the first n rows present in the input data frame
+
+tab$Week = as.Date(cut(Dates,breaks = "week",start.on.monday = F)) # Date broken into weeks, starting on Monday
+head(tab$Week)
+
+tab$Days = as.Date(cut(Dates,breaks = "day",start.on.monday = F)) # Date broken into days, starting on Monday
+head(tab$Days)
+
+Num = table(Laptops$Retail.Price) # Creates a table with all Retail Prices
+head(Num) # Check 'Num'
+Laptops2 = cbind(Laptops,Num) # Mergers data together
+Laptops2 <- na.omit(Laptops2) # Remove the missing values
+summary(Laptops2) # Check 'Laptops2'
+
+bymonth = aggregate(cbind(Retail.Price)~month(Dates),data = Laptops2, FUN = mean) # Creates table with Retail Price and month
+bymonth # Calls the table
+
+Price = Laptops2$Retail.Price # Rename
+
+# Line chart based on monthly data
+ggplot(data = tab,aes(Month,Price)) +
+        stat_summary(fun = median,geom = "line") +
+        scale_x_date(labels=date_format("%Y-%m"),breaks = "1 month") +
+        ggtitle("Monthly Price Evolution") +
+        theme(plot.title = element_text(hjust = 0.5)) + # Adjust plot title
+        theme(axis.text.x = element_text(face = "bold",color = "black",size = 8)) # Adjust x axis title
+
+# Line chart based on weekly data
+ggplot(data = tab,aes(Week,Price),na.rm = T) +
+        stat_summary(fun = median,geom = "line") +
+        scale_x_date(labels = date_format("%Y-%m"),breaks = "1 month") +
+        ggtitle("Weekly Price Evolution") +
+        theme(plot.title = element_text(hjust = 0.5)) + # Adjust plot title
+        theme(axis.text.x = element_text(face = "bold",color = "black",size = 8)) # Adjust x axis title
+
+# Line chart based on daily data
+ggplot(data = tab,aes(Days,Price)) +
+        stat_summary(fun = median,geom = "line") +
+        scale_x_date(labels = date_format("%Y-%m"), breaks = "1 month") +
+        ggtitle("Daily Price Evolution") +
+        theme(plot.title = element_text(hjust = 0.5)) + # Adjust plot title
+        theme(axis.text.x = element_text(face = "bold",color = "black",size = 8)) # Adjust x axis title
+```
+
+Yes, price changes over time. If you compare the three time-series charts above, you will notice the following:  
+1. From May to July, there was a continuous increase in retail price. This could be due to a new product launching or feature that persuaded customers to purchase within that time frame.  
+2. Although retail price decreased after July for a couple months, we see another slight uptick in October. Once again, we can speculate why this occurred.  
+3. The first two points can be easily observed within the monthly and weekly charts. When considering daily though, you'll notice that the highest retail price in that peak time frame of July was $540.  
+
+**iii.** *Are prices consistent across retail outlets?*
+
+```{r}
+# Create an aggregated table showing the average Retail Price per Store.Postcode
+retail_post <- aggregate(Laptops$Retail.Price, 
+                    by = list(Laptops$Store.Postcode), 
+                    FUN = mean, na.rm = T)
+names(retail_post) <- c("Stores", "MeanRetailPrice") # Assign names
+
+# A bar plot shows the breakout of how the stores are performing
+ggplot(retail_post) + 
+  geom_bar(aes(x = Stores , y = MeanRetailPrice, fill=Stores), na.rm = T, stat = "identity") +
+  ggtitle("Price Consistency Per Stores") + # Title name
+  ylab("Mean Retail Price") + xlab("Store")  + # Label names
+  theme(plot.title = element_text(size=50)) + # Title text size
+  theme_classic(base_size = 8) # Elongating the graph to show all values
+
+# A box plot shows a little more detail about the distribution of data points, Laptops2 used from ii
+boxplot(Laptops2$Retail.Price~Laptops2$Store.Postcode,data = Laptops2,
+        main = "Price Consistency per Stores", xlab = "Stores", ylab ="Price",
+        border = "black", las = 2, cex.axis=0.55)
+```
+
+Out of the 15 stores, only five locations are not selling at a mean of $500. Instead, they are averaging about $30 less than the top performers.
+
+**iv.** *How does price change with configuration?*
+
+```{r, message=FALSE, warning=FALSE}
+# Add a trend line along with configuration points to show their relationship
+config.smooth <- ggplot(Laptops) +
+  geom_smooth(aes(x = Retail.Price, y = Configuration), color = "black") + # Labeled and colored
+  geom_point(aes(x = Retail.Price, y = Configuration), color = "red") + # Labeled and colored
+  labs(title = "Price Compared to Configuration", x = "Retail Price", y = "Configuration Number") + # Title and label names
+  theme_classic()
+config.smooth + coord_flip() # Flipped the chart to make it more readable
+```
+
+As the configuration number increases, we can see its direct effect on retail price in a positive direction. This graph shows how the two variables are closely related. 
+
+**B** - Location Questions:  
+**i.** *Where are the stores and customers located?*
+
+```{r, message=FALSE, warning=FALSE}
+# Map with open street map
+map_os <- get_map(getbb("London"), source = "osm")
+ggmap(map_os)
+
+# Transform coordinates for stores locations
+colnames(Laptops)
+Laptops[1:5, 14:17] # overview coordinates data
+
+# Select stores and its coordinates
+stores_locations <- na.omit(unique(Laptops[, c("Store.Postcode", "store.X", "store.Y")]))
+head(stores_locations)
+
+# Create SpatialPointsDataframe
+stores_locations_SP <- SpatialPointsDataFrame( 
+  data = data.frame(stores_locations$Store.Postcode),    # data, stores names (postcodes)
+  stores_locations[, c("store.X", "store.Y")],           # coordinates, x for "Easting", y for "Northing"
+  proj4string = CRS( "+init=epsg:27700" ) )              # proj4string of the coordinates, assign CRS to data
+
+head(stores_locations_SP)
+class(stores_locations_SP)  # sp object
+
+# Note:
+## CRS, Coordinate reference systems. CRS provide a standardized way of describing locations.
+## A particular CRS can be referenced by its EPSG code.
+## EPSG stands for European Petroleum Survey Group. They publish a database of coordinate system 
+## information plus some related documents on map projections and datums. 
+## The EPSG codes are 4-5 digit numbers that represent CRS definitions. 
+## proj4string is notation used in R to describe the CRS.
+## EPSG:27700 Projected coordinate system for United Kingdom (UK)
+## to find code p ex just google "british national grid coordinate system epsg code" 
+
+# Transform coordinates
+stores_locations_SP_LL <- spTransform(stores_locations_SP,  CRS("+init=epsg:4326")) # Data
+head(stores_locations_SP_LL)
+
+#Note:
+## EPSG: 4326 code is commonly used by organizations that provide GIS data for the 
+## entire globe or many countries. CRS used by Google Earth.
+
+# Transform to data frame
+stores_locations_LL <- data.frame(stores_locations_SP_LL)[,c(1:3)]      # keep first 3 columns
+colnames(stores_locations_LL) <- c( "Store", "Longitude","Latitude")    # rename stores variables
+head(stores_locations_LL)
+
+
+#plot(Laptops$customer.X, Laptops$customer.Y,  main="Stores and Customers Locations",xlab = "Longitude",ylab = "Latitude",
+#          pch = 16,cex = 0.5,col = "black",bg = "yellow") # Plot in R base with customers 'under' stores
+#points(Laptops$store.X, Laptops$store.Y,pch=18, cex=2, col= "red")
+
+
+store_cust <- ggplot(Laptops)+ # Overlapping customers and stores to see their locations
+  geom_point(aes(customer.X, customer.Y))+
+  geom_point(aes(store.X, store.Y, color = Store.Postcode,  size = 5))+ 
+  theme(legend.position = "none") +
+  ggtitle("Stores and Customers Locations") + # Title name
+  ylab("Latitude") + xlab("Longitude")  + # Label names
+  theme(plot.title = element_text(size=50)) + # Title text size
+  theme_classic(base_size = 8) # Elongating the graph to show all values
+
+store_cust
+
+```
+
+The majority of the customers are located within the center. If we compare this chart to the London map, we will see that most people are around the major city. The stores seem to surround that same area as well, but some are further away. This logically makes sense because in the real world, stores choose their location based on the poplation that surrounds that area.
+
+**ii.** *Which stores are selling the most?*
+
+```{r, message=FALSE, warning=FALSE}
+L <- Laptops %>%
+  ggplot(aes(x = fct_infreq(Store.Postcode))) + # Assigning frequency values to factor levels
+  geom_bar() +
+  labs(x = "Stores", y = "Count") + # Axis labels
+  ggtitle("Stores with the Most Sales",) +  # Title name
+  theme(plot.title = element_text(size=50)) + # Title size
+  theme_classic(base_size = 8) # Elongating the graph to see all stores
+  
+L # Calls the histogram
+
+```
+
+There are three stores that have sales above $20,000. Those are SW1 3AU, SE1 2BN, and SW1V 4QQ.  
+
+**iii.** *How far would customers travel to buy a laptop?*
+
+```{r, message=FALSE, warning=FALSE}
+#customercords$Store.Postcode <- Laptops$Store.Postcode
+#customercords$Store.Postcode
+
+#agg.medcustomers <- (stores_locations_LL[,c("Longitude","Latitude")], by=list(stores_locations_LL$Store.Postcode), FUN = mean)
+#agg.medcustomers
+
+#ggplot(agg.medcustomers,aes(x = Longitude,y = Latitude)) + 
+#  geom_point(aes(x = Longitude, y = Latitude, color=store_postcode, fill=store_postcode), data = stores_coord_LL, shape=2, size=3) +
+#  xlab("Longitude") + ylab("Latitude") + theme_classic() 
+
+ggplot(Laptops)+ # Overlapping customers and stores to see their locations
+  geom_point(aes(customer.X, customer.Y, color = Retail.Price))+
+  geom_point(aes(store.X, store.Y, color = Retail.Price,  size = 5))+ 
+  theme(legend.position = "none") +
+  ggtitle("Stores and Customers Locations") + # Title name
+  ylab("Latitude") + xlab("Longitude")  + # Label names
+  theme(plot.title = element_text(size=50)) + # Title text size
+  theme_classic(base_size = 8) # Elongating the graph to show all values
+
+```
+
+As my approach may not be correct, I believe that the logic may be slightly justified in finding how far customers would travel. When analyzing the chart above, the customers and stores are colored by retail price because if a store has a lower price point, that means that there are less customers going to that specific location. If that location has a higher retail price attached, you could assume that customers are willing to travel to that store instead.
+
+**iv.** *Try an alternative way ok looking at how far customers traveled. Do this by creating a new column that computes the distance between customer and store.* 
+
+```{r, message=FALSE, warning=FALSE}
+Laptops2$Eucdist=sqrt((Laptops2$customer.X-Laptops2$store.X)^2+((Laptops2$customer.Y-Laptops2$store.Y)^2)) # Formula for Euclidean distance
+head(Laptops2[, c(4,5,20)])  # Display the first n rows present in the input data frame
+summary(Laptops2$Eucdist) # Produce result summary for Eucdist
+
+Eucldist = densityplot(Laptops2$Eucdist, main="Distance Between the Stores and Customers (m)",xlab = "Distance (m)",col="black", )
+Eucldist # Shows the distribution of distance
+```
+
+The variable 'Eucdist' was created to calculate the distance between how far customers traveled. Since there are over 142,000 observations, I wanted to focus on the main summary statistics: min, max, mean, and median. We will make an assumption that distance is measured in meters. The shortest distance is 0 meters (practically right next door), spanning to 19,892m. Additionally, when looking at the chart above, one can gather that customers were typically averaging their travel distance from 4.5 to 5 kilometers. 
+
+**C** - Revenue Questions:  
+**i.** *How do the sales volume in each store relate to Acell's revenues?*
+
+```{r, message=FALSE, warning=FALSE}
+# Bar chart shows top performers by Revenue
+ggplot(data = Laptops,aes(x = Laptops$Store.Post,y = Retail.Price)) +
+        geom_bar(stat = "identity") + # Type of chart
+        ggtitle("Laptop Sales per Store (Revenue)") + # Title names
+        xlab("Stores") + ylab("Revenue") + # Label names
+        theme(plot.title = element_text(size=50)) + # Sets title size 
+        theme_classic(base_size = 8) # Elongates the graph
+
+revenue <- aggregate(Laptops$Retail.Price, # Aggregation without missing values
+                    by = list(Laptops$Store.Postcode), 
+                    FUN = sum, na.rm = T)
+names(revenue) <- c("Stores", "Sales") # Set the name 
+
+ggplot(revenue) + 
+  geom_bar(aes(x = "", y = Sales, fill=Stores),  na.rm = T, stat = "identity", width = 1) + 
+  labs(title = "Laptop Sales per Store (Revenue)", x="Stores", y="Revenue")
+
+# Create table that shows the % and total of sales per store
+revenue <- mutate(revenue,  # Adds a new variable 
+                Store_wise_Sales_pct = Sales * 100 / sum(Sales)) %>%
+  arrange(desc(Store_wise_Sales_pct))
+revenue 
+
+```
+
+The top three performing stores who hold approximately 48.8% of Acell's revenue are SW1P 3AU, SE1 2BN, and SW1V 4QQ. All other stores are below $8,300,000 compared to the top three that are above $10M.
+
+**ii.** *How does this relationship depend on the configuration?*
+
+```{r, message=FALSE, warning=FALSE}
+ggplot(Laptops) +
+  geom_bar (aes(x=Store.Postcode, y=Configuration), stat="identity")  + # Set x and y
+  labs(title = "Store Compared to Configuration", x="Store.Postcode", y="Configuration") + # Add graph title
+  theme_classic(base_size = 8) # Elongating the graph to show all values
+
+sales.df <- mutate(Laptops, Configuration.Small=round(Configuration/100)) # round function and call in new variable
+ggplot(sales.df) +
+  geom_bar(aes(x=Store.Postcode, y=Retail.Price, fill=factor(Configuration.Small)), stat="summary",
+           fun='sum', position = 'fill') +
+  labs(title = "Retail Price and Store Postcode", x="Store Postcode", y="Retail Price")+
+  theme(axis.text.x = element_text(angle = 90))# Labeling the graph
+
+```
+
+You will notice that from the last exercise on Revenue versus Postcode to the bar chart above, they almost look identical. This means that the stores who have higher revenues will likely be those who are selling the higher configuration laptops. Therefore, the relationship between Configuration and Revenue based on store located is positive. 
+
+**D** - Configuration Questions:  
+**i.** *What are the details of each configuration? How does this relate to price?*  
+
+```{r, message=FALSE, warning=FALSE}
+conpric <- aggregate(Laptops$Retail.Price, by = list(Laptops$Configuration), FUN = mean, na.rm = T) #Aggregate and remove missing values
+
+names(conpric) <- c("Configuration", "MeanRetailPrice") # Set name
+
+ggplot(conpric) + geom_point(aes(x = Configuration, y = MeanRetailPrice), stat = "identity") # Create points with ggplot
+
+price.config <- Laptops[,c(6:13)] # Call only those variables that are configured
+price.config <- melt(price.config, "Retail.Price") # Organize the data - book reference
+
+price.config.box <- ggplot(price.config, aes(x = value, y = Retail.Price)) + 
+  geom_boxplot() + 
+  stat_summary(fun = "mean", color = "red", size = .5) +
+  facet_wrap(~variable, scales = "free", ncol = 3) +  # Facet wrap allows more than one variable to be shown in the same window
+  labs(title = "Details of Configuration vs Price", x="Configurations", y="Retail Price") + # Label the chart
+  theme_classic() 
+
+price.config.box
+
+```
+
+Overall, there is a positive correlation between Configuration and MeanRetailPrice as they both increase as their values become larger. We have seen this before in the Price section. If we want to review the individual details of each configuration, you will notice the following:  
+- All of the configurations increase with price the better the feature is. For example, those who bought a laptop with a HD.Size.GB 300 spent more money versus if they bought one  with 80.   
+- The largest difference in price between the configurations appear to be with RAM.GB. The median price for RAM.GB 4 is about $600 while 1 and 2 are below $500.   
+
+**ii.** *Do all stores sell all configurations?*
+
+```{r, message=FALSE, warning=FALSE}
+ggplot(Laptops, aes(y=Configuration, x=Store.Postcode)) + # Call ggplot and variables
+  geom_boxplot() + # Use box plot in ggplot
+  stat_summary(fun="mean",color="red", size = .5) + # A summary statistic is used to show the mean
+  labs(title = "Store Configuration") + # Title name
+  theme_classic(base_size = 8) # Elongating the graph to show all values # Remove background noise
+
+number.of.stores <- count(Laptops %>%  # Creating a variable by grouping Store.Postcode 
+                            group_by(Store.Postcode) %>%
+                            summarize(count=n()))
+
+number.of.config <- count(Laptops %>% # Creating a variable by grouping Configuration
+                            group_by(Configuration) %>%
+                            summarize(count=n()))
+
+count.conf <- Laptops %>%  # Creating a table to show the relationship between Store and Config.
+  group_by("Store Postcode" = Store.Postcode) %>%
+  summarise(Number.of.same.configuration = length(unique(Configuration))) %>% 
+  arrange(Number.of.same.configuration)
+count.conf
+
+```
+
+According to the graphic above, some stores do not sell all configurations as they do not reach 864. It is a quite difficult to distinctively tell which stores those are. Therefore, in the table, you will notice that N3 1DH, E7 8NW, and KT2 5AU all fall under 750 types of configurations.

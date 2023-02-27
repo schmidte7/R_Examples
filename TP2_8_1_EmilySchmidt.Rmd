@@ -1,0 +1,288 @@
+---
+title: "TP2_8.1"
+author: "Emily Schmidt"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r, message=FALSE, warning=FALSE}
+library(data.table) # Fast aggregation of large data sets and a fast file reader
+library(caret) # Functions that attempt to streamline the process for creating predictive models
+library(reshape2) # Easily transform our data into whatever structure we may need
+library(kableExtra) # Add elements to a a pivot table
+library(e1071) # Naive Bayes classification
+library(randomizr) # Simplifies the design and analysis of randomized experiments
+library(FNN) #  Fast Nearest Neighbor Search Algorithms and Applications
+library(tidyr) # Contains tools for changing the shape and hierarchy of a data set
+library(DataExplorer) # Used to graph missing value percentages
+library(pivottabler) # Enables pivot tables to be created and rendered/exported
+```
+
+```{r, message=FALSE, warning=FALSE}
+setwd("C:\\Users\\emann\\GSEM Master\\Data Mining\\Homework 2") # Set directory
+getwd() # Check the working directory
+
+UniBank <- read.csv("UniversalBank.csv", sep = ",", header = T) # Load your data, UniversalBank
+```
+```{r, message=FALSE, warning=FALSE}
+dim(UniBank) # Get or set the dimension of the specified matrix, array or data frame
+head(UniBank) # Display the first n rows present in the input data frame
+View(UniBank) # Invoke a spreadsheet-style data viewer within RStudio
+summary(UniBank) # Produce result summaries of the results of various model fitting functions
+str(UniBank) # Compactly displaying the internal structure of a R object
+
+which(is.na(UniBank)) # Function returns the positions with missing values
+
+plot_missing(UniBank) # Plots the percentages of missing values
+```
+
+```{r}
+# Create a summary statistics table to show metrics, ensuring that missing values are not included
+CSUM <- data.frame(mean = sapply(UniBank[,c(2:4, 6:14)], mean,na.rm = T) 
+                ,median = sapply(UniBank[,c(2:4, 6:14)], median,na.rm = T)
+                ,min = sapply(UniBank[,c(2:4, 6:14)], min,na.rm = T)
+                ,max = sapply(UniBank[,c(2:4, 6:14)], max,na.rm = T)
+                ,sd = sapply(UniBank[,c(2:4, 6:14)], sd,na.rm = T))
+colnames(CSUM) = c("Mean","Median","Min","Max","Standard Deviation")
+CSUM
+```
+
+```{r}
+UniBank %>% gather() %>% head() # Reshaping the data which means it collects a set of column names and places them into a single “key” column
+
+UniBank_data <- UniBank[,-c(1,5)] # Remove ID and Zip from data to review quantitative values
+
+ggplot(gather(data = UniBank_data),aes(value)) +
+  geom_histogram(bins = 10, color = "white") + # Creates bin sizing and sets the lines as white
+  facet_wrap(~key,scales = "free") + # Converting the graphs into panels
+  ggtitle("Quantitative Variable Analysis") + # Title name
+  ylab("Count") + xlab("Value") + # Label names
+  theme_classic() # A classic theme, with x and y axis lines and no grid lines
+```
+
+One of the most important parts of analyzing your data is to conduct a preliminary exploratory review. The following points outline high-level conclusions:  
+- There are 5,000 observations and 14 variables within the raw data set.  
+- The data includes information on ID, age, years of professional experience, annual income, family size, average credit card amount/month, education level, mortgage value, and about the various accounts they could have.  
+- It can be noticed between the various accounts one can have, those variables are binary (Personal.Loan, Securities.Account, CD.Account, Online, and CreditCard).  
+- There are two types of variables: int and num. Later on, we will have to convert multiple to a factor in order to appropriate levels.  
+- Within the 12 quantitative variables, the mean, median, min, max, and standard deviation all differ. The mean for Age, Experience, Income, and Mortgage will have higher means as they have larger variance, while those that are binary variables will be between an average of 0-1.  
+- The unusual data point in the data table is the Education -3. Intuitively, we know that this value is not logical and will ignore as there may have been some intuition behind '-3'. Since I am not the subject matter expert, additional resources will be needed.  
+- According the histograms, CCAvg, Income, and Mortgage are positively skewed. Variables that only have two bars at positions zero and one indicate those that are binary. Out of all the customer accounts, the one that stands out is Online, as the majority of Customers use the Online option while the other accounts have a larger quantity in zero or 'no'.
+
+# 7.2 Exercise  - Personal Loan Acceptance  
+Universal Bank is a relatively young bank growing rapidly in terms of overall customer acquisition. The majority of these customers are liability customers (depositors) with varying sizes of relationship with the bank. The customer base of asset customers (borrowers) is quite small, and the bank is interested in expanding this base rapidly to bring in more loan business. In particular, it wants to explore ways of converting its liability customers to personal loan customers (while retaining them as depositors). A campaign that the bank ran last year for liability customers showed a healthy conversion rate of over 9% success. This has encouraged the retail marketing department to devise smarter campaigns with better target marketing. The goal is to use k-NN to predict whether a new customer will accept a loan offer. This will serve as the basis for the design of a new campaign.  
+The file UniversalBank.csv contains data on 5000 customers. The data include customer demographic information (age, income, etc.), the customer’s relationship with the bank (mortgage, securities account, etc.), and the customer response to the last personal loan campaign (Personal Loan). Among these 5000 customers, only 480 (= 9.6%) accepted the personal loan that was offered to them in the earlier campaign. Partition the data into training (60%) and validation (40%) sets. 
+
+**A.** *Create a pivot table for the training data with Online as a column variable, CC as a row variable, and Loan as a secondary row variable. The values inside the table should convey the count. In R use functions melt() and cast(), or function table().*
+
+```{r}
+# Treat variables as categorical (R will create dummy variables) (page 245)
+UniBank$Personal.Loan = as.factor(UniBank$Personal.Loan) 
+UniBank$Online = as.factor(UniBank$Online)
+UniBank$CreditCard = as.factor(UniBank$CreditCard)
+
+# Renamed the variables to show labels in pivot table
+levels(UniBank$Personal.Loan) <- c("Loan Rejected", "Loan Accepted")
+levels(UniBank$Online) <- c("Offline", "Online")
+levels(UniBank$CreditCard) <- c("No Credit Card", "Credit Card")
+
+str(UniBank)
+
+```
+
+```{r, message=FALSE, warning=FALSE}
+set.seed(111) #  Set the seed for the random number generator for reproducing the partition. (page 258)
+
+# Partitioning into training (60%) and validation (40%) (page 38)
+train.index <- sample(rownames(UniBank), 0.6*dim(UniBank)[1])
+train.df <- UniBank[train.index, ] # Collect all the columns with training rows into training set (page 38)
+
+valid.index <- setdiff(row.names(UniBank), train.index) # # Assign rows that are not already in the training set into validation (page 38)
+valid.df <- UniBank[valid.index, ] # Collect all the columns with validation rows into validation set (page 38)
+
+```
+
+```{r}
+# Creates a flat contingency table based on the exercises recommendation
+pivot = ftable(train.df$CreditCard, train.df$Personal.Loan, train.df$Online)
+pivot
+
+```
+
+In this first analysis, there are three key features in review:  
+1. Do customers have credit card issued by the bank?  
+2. Did customers open a personal loan that was offered at the last campaign?  
+3. Do customers utilize Universal's online services?  
+
+It was pointed out earlier that customers seemed to have a larger online presence compared to the other accounts. This can be confirmed within the pivot table as 1,776 customers are using the internet services. This percentage accounts for those who do and do not have a personal loan or credit card. Since a majority of individuals do not have a personal loan or credit card, we can assume they are on the bank's website or application for other reasons. Additionally, there are only 9.73% out of the 3,000 customers who have a personal loan, and 29.97% who have a credit card regardless if they have a loan or an online presence. These breakdowns will play an important role later as we isolate our data to see how these attributes will classify individuals.  
+
+**B.** *Consider the task of classifying a customer who owns a bank credit card and is actively using online banking services. Looking at the pivot table, what is the probability that this customer will accept the loan offer? [This is the probability of loan acceptance (Loan = 1) conditional on having a bank credit card (CC = 1) and being an active user of online banking services (Online = 1)].*
+
+```{r}
+# Using the value positions within the pivot table to calculate Bayes (page 190 formula)
+
+Bayes = pivot[4,2]/(pivot[3,2] + pivot[4,2])
+paste(format(round(100*Bayes,2), nsmall = 2), "%") # Formatting the value
+
+```
+The chance that a customer who owns a credit card and is actively using the online services is pretty low. The probability that the bank can expect a customer to accept a loan is 9.80%.
+
+**C.** *Create two separate pivot tables for the training data. One will have Loan (rows) as a function of Online (columns) and the other will have Loan (rows) as a function of CC.*  
+
+```{r, message=FALSE, warning=FALSE}
+# Creates a flat contingency table based on the exercises recommendation
+pivot_online = ftable(train.df$Personal.Loan, train.df$Online)
+pivot_online
+
+pivot_cc = ftable(train.df$Personal.Loan, train.df$CreditCard)
+pivot_cc
+
+```
+
+The pivot table is a broken out into Online and Credit Cards, kind of like what we see in **A**. Here, we can break out loan as a function of online and creditcard. This is helpful because we can confirm that most of our customers (90.26%) do not have a loan, 40.8% are not utilizing the online services, and 70.03% do not have a credit card. These values demonstrate that Universal could have the opportunity to market certain services or accounts to their customers which could increase sales.
+
+**D.** *Compute the following quantities [P(A | B) means “the probability of A given B”]:*  
+**i.** *P(CC = 1 | Loan = 1) (the proportion of credit card holders among the loan acceptors)*
+
+```{r}
+# Using the pivot value value positions to calculate the probabilities
+
+i = pivot_cc[2,2]/(pivot_cc[2,1]+pivot_cc[2,2]) # [row, column] position
+paste(format(round(100*i,2), nsmall = 2), "%") # Formatting the value
+
+```
+
+The probability that a customer has a credit card given a personal loan is 29.79%.   
+
+**ii.** *P(Online = 1 | Loan = 1)*
+
+```{r}
+# Using the pivot value value positions to calculate the probabilities
+
+ii = pivot_online[2,2]/(pivot_online[2,1]+pivot_online[2,2]) # [row, column] position
+paste(format(round(100*ii,2), nsmall = 2), "%") # Formatting the value
+```
+
+The probability that a customer uses Universal's online services given a personal loan is 61.64%.   
+
+**iii.** *P(Loan = 1) (the proportion of loan acceptors)*
+
+```{r}
+# Using the pivot value value positions to calculate the probabilities
+
+iii = (pivot_online[2,1] + pivot_online[2,2])/sum(pivot_online) # [row, column] position
+paste(format(round(100*iii,2), nsmall = 2), "%") # Formatting the value
+```
+
+The probability that a customer has personal loan is 9.73%.  
+
+**iv.** *P(CC = 1 | Loan = 0)*
+
+```{r}
+# Using the pivot value value positions to calculate the probabilities
+
+iv = pivot_cc[1,2]/(pivot_cc[1,1]+pivot_cc[1,2]) # [row, column] position
+paste(format(round(100*iv,2), nsmall = 2), "%") # Formatting the value
+```
+
+The probability that a customer has a credit card given they do not have a personal loan is 29.99%. 
+
+**v.** *P(Online = 1 | Loan = 0)*
+
+```{r}
+# Using the pivot value value positions to calculate the probabilities
+
+v = pivot_online[1,2]/(pivot_online[1,1]+pivot_online[1,2]) # [row, column] position
+paste(format(round(100*v,2), nsmall = 2), "%") # Formatting the value
+```
+
+The probability that a customer has a online presence given they do not have a personal loan is 58.94%. 
+
+**vi.** *P(Loan = 0)*
+
+```{r}
+# Using the pivot value value positions to calculate the probabilities
+
+vi = (pivot_online[1,1] + pivot_online[1,2])/sum(pivot_online) # [row, column] position
+paste(format(round(100*vi,2), nsmall = 2), "%") # Formatting the value
+```
+
+The probability that a customer does not have a personal loan is 90.27%. 
+
+**E.** *Use the quantities computed above to compute the naive Bayes probability P(Loan = 1 | CC = 1, Online = 1).*
+
+```{r}
+# Calculating Naive Bayes by output values in D (page 191 formula)
+NaiveBayes <- (i*ii*iii)/(i*ii*iii+iv*v*vi)
+
+N <- paste(round(100*NaiveBayes,2),"%")
+N
+
+```
+
+By using conditional probability, we obtain a 9.06% of customers who have a personal loan given they have a credit card and online services.
+
+**F.** *Compare this value with the one obtained from the pivot table in (b). Which is a more accurate estimate?*
+
+```{r}
+# Comparing Bayes and Naive Bayes by calling each variable 
+
+y = "Bayes:"
+paste(y, round(100*Bayes,2),"%")
+
+x = "Naive Bayes:"
+paste(x, round(100*NaiveBayes,2),"%")
+```
+
+The two theorems produce similar results, but not quite. Naive Bayes (NB) assumes independence of the predictor variables and ignores prior distribution of parameters. In the real world, assuming independence is rare. Naive pays attention to complex interactions and local structure, as well as works best when the goal is to classify or rank. If the goal is to estimate actual probabilities (which are the exercises above), the results would be biased. Therefore, the better estimator would be Bayes at 9.80%.
+
+**G.** *Which of the entries in this table are needed for computing P(Loan = 1 | CC = 1, Online = 1)? In R, run naive Bayes on the data. Examine the model output on training data, and find the entry that corresponds to P(Loan = 1 | CC = 1, Online = 1). Compare this to the number you obtained in (E).*  
+
+To calculate the Naive Bayes output, there are only two values that are needed within the pivot table below. They are at positions [4,2] and [3,2], which correlate to 54 and 497. To compare the output above in Naive Bayes and in **E** and here, we must utilize the naiveBayes() function which outputs essentially what we found in the pivot table but in percentages.
+
+```{r}
+pivot # Calling pivot table from A to show comparison
+
+# Applying Naive Bayes classifier 
+NaiveBayes2 = naiveBayes(Personal.Loan ~ Online + CreditCard, data = train.df)
+NaiveBayes2
+```
+
+
+```{r}
+# Calculate the value of each cell in a table as a proportion of all values
+a_priori = prop.table(NaiveBayes2$apriori) 
+online = NaiveBayes2$tables$Online
+credit = NaiveBayes2$tables$CreditCard
+
+# Calculation of Naive Bayes - similar to exercises above
+a = a_priori[1] * online[1,2] * credit[1,2]
+b = a_priori[2] * online[2,2] * credit[2,2]
+
+nbayes2 = 1/(1+(a/b))
+
+z = "Naive Bayes Recalculated:"
+paste(z, round(100*nbayes2,2),"%")
+```
+
+Within the Naive Bayes Classifier for Discrete Predictors table, there were several elements that were needed. They are the following:  
+- The percentage of customers who **do not have** a personal loan (90.26%)  
+- The percentage of customers who **do have** a personal loan (9.73%)  
+- The percentage of customers who **do not have** a personal loan but **have** online services (58.94%)  
+- The percentage of customers who **do not have** a personal loan and **do not have** online services (41.06%)  
+- The percentage of customers who **do have** a personal loan but **have** online services (61.64%)  
+- The percentage of customers who **do have** a personal loan but **do not have** online services (38.36%)   
+- The percentage of customers who **do not have** a personal loan but **have** credit card (29.99%)  
+- The percentage of customers who **do not have** a personal loan and **do not have** credit card (70.01%)  
+- The percentage of customers who **do have** a personal loan but **have** credit card (29.79%)  
+- The percentage of customers who **do have** a personal loan but **do not have** credit card (70.21%) 
+
+The value in **E** is equivalent to the recalculation of the Naive Bayes in **G**, as they both are 10.08%.
+
+
+
+

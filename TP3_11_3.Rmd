@@ -1,0 +1,390 @@
+---
+title: '11.3 Exercise: Car Sales'
+author: "Emily Schmidt"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+**Completed exercise using the Data Mining textbook, not the errata.**
+
+```{r, message=FALSE, warning=FALSE}
+library(data.table) # Fast aggregation of large data sets and a fast file reader
+library(forecast) # Predict()
+library(neuralnet) # Allows flexible settings through custom-choice of error and activation function
+library(NeuralNetTools) # Visualization  tools for neural networks
+library(Metrics) # Another way to calculate RMSE - did not use but for further reference
+library(caret) # Functions that attempt to streamline the process for creating predictive models
+library(kableExtra) # Add elements to a a pivot table
+library(ggfortify) # Add titles to lm() function
+```
+
+```{r, message=FALSE, warning=FALSE}
+setwd("C:\\Users\\emann\\GSEM Master\\Data Mining\\Homework 3") # Set directory
+getwd() # Check the working directory
+
+Toyota <- read.csv("ToyotaCorolla.csv", sep = ",", header = T) # Load your data, ToyotaCorolla
+```
+
+**Exploratory Analysis** was completed in Exercise 6.4. Please refer to that HTLM for further information on the ToyotaCorolla dataset.  
+
+#### **Overview - Car Sales**
+Consider the data on used cars (ToyotaCorolla.csv) with 1,436 records and details on 38 attributes, including Price, Age, KM, HP, and other specifications. The goal is to predict the price of a used Toyota Corolla based on its specifications.  
+
+**A.** *Fit a neural network model to the data. Use a single hidden layer with 2 nodes.*  
+• *Use predictors Age_08_04, KM, Fuel_Type, HP, Automatic, Doors, Quarterly_Tax, Mfr_Guarantee, Guarantee_Period, Airco, Automatic_airco, CD_Player, Powered_Windows, Sport_Model, and Tow_Bar.*  
+
+```{r}
+# Use only certain columns per the instructions above
+Toyota <- Toyota[,c(
+  "Price", "Age_08_04", "KM", "Fuel_Type", "HP", "Automatic", "Doors", "Quarterly_Tax","Mfr_Guarantee", "Guarantee_Period","Airco", "Automatic_airco", "CD_Player", "Powered_Windows", "Sport_Model", "Tow_Bar"
+)]
+
+summary(Toyota) # Produce result summaries of the results of various model fitting functions
+```
+
+• *Remember to first scale the numerical predictor and outcome variables to a 0–1 scale (use function preprocess() with method = “range”—see Chapter 7) and convert categorical predictors to dummies.*   
+
+Convert the categorical variable, 'Fuel=Type', into a dummy variable and rename the columns.
+```{r}
+# Convert categorical Fuel_Type to dummy variable
+Toyota$Fuel_Type = as.factor(Toyota$Fuel_Type) # Treat Fuel_Type as categorical (R will create dummy variables) (page 245)
+
+dummy <- dummyVars(~.,data = Toyota) # Creates a full set of dummy variables for specified factors
+
+Toyota_Data <- as.data.frame(predict(dummy, newdata = Toyota)) # Creates a dataset including the new dummy variables
+
+str(Toyota_Data) # Used for compactly displaying the internal structure of a R object
+```
+**Resource:** https://rdrr.io/cran/caret/man/dummyVars.html
+
+```{r}
+set.seed(1) #  Set the seed for the random number generator for reproducing the partition. (page 258)
+
+# Partitioning into training (60%) and validation (40%) (page 38)
+train.index <- sample(rownames(Toyota_Data), 0.6*dim(Toyota_Data)[1])
+train.df <- Toyota_Data[train.index, ] # Collect all the columns with training rows into training set (page 38)
+
+valid.index <- setdiff(row.names(Toyota_Data), train.index) # # Assign rows that are not already in the training set into validation (page 38)
+valid.df <- Toyota_Data[valid.index, ] # Collect all the columns with validation rows into validation set (page 38)
+
+train.norm.df = train.df # Rename
+valid.norm.df = valid.df # Rename
+
+# Use preProcess() from the caret package to normalize the quantitative variables (page 177)
+norm.values = preProcess(train.df, method=c("range"), na.remove = T) # Standardize on train for continuous variables
+
+train.norm.df = predict(norm.values, newdata = train.df) # Means and standard deviation and apply them to train data (predict probabilities) (page 197)
+
+valid.norm.df = predict(norm.values, newdata = valid.df) # Means and standard deviation and apply them to validation data - means could be slightly different than zero (predict probabilities) (page 197)
+```
+
+```{r}
+# Unscales predictions to calculate RMSE 
+min = min(train.df$Price)
+max = max(train.df$Price)
+
+# Create function that will use unscale.price in future calculations
+unscale.price <- function(scaled.price){
+  unscaled = scaled.price*(max-min) + min
+  return(unscaled)}
+```
+
+**Resource:** https://datascienceplus.com/neuralnet-train-and-test-neural-networks-using-r/  
+
+### Neural Network: 1 Hidden Layer, 2 Nodes (Training)
+```{r,fig.width = 6, fig.height = 5}
+# Run a neural network with dummy variables (page 280)
+NN1 <- neuralnet(Price ~ 
+                  Age_08_04 + KM + HP + Automatic + Doors + Quarterly_Tax +
+                  Mfr_Guarantee + Guarantee_Period + Airco + Automatic_airco + 
+                  CD_Player + Powered_Windows + Sport_Model + Tow_Bar +
+                  Fuel_Type.Diesel + Fuel_Type.Petrol,
+                  data = train.norm.df, 
+                  hidden = 2,
+                  linear.output = TRUE)
+
+# Plot network (page 280)
+plot(NN1, rep = "best")
+```
+
+One of the most basic types of neural nets is the Feed Forward (FF). This means that the nodes are fully connected, activation flows from input layer to output are without back loops, and there is only one layer between the input and output. Since it was requested that a single layer and two nodes were utilized, this is the same result as the FF. There are 17 nodes in the input layer that get condensed into two before the final prediction of price. Additionally, the weights are calculated using a back propagation algorithm which are the values in black. The blue lines display the bias terms.
+
+**Resources:**   
+- https://towardsdatascience.com/the-mostly-complete-chart-of-neural-networks-explained-3fb6f2367464    
+- https://www.analyticsvidhya.com/blog/2017/09/creating-visualizing-neural-network-in-r/
+
+```{r}
+# Means and standard deviation and apply them to train data (predict probabilities) (page 197)
+pred1.train = predict(NN1, newdata = train.norm.df)
+
+# Applies function 'unscale.price' to the validation data
+pred1.unscaled = unscale.price(pred1.train)
+
+# Creates a data frame for actual and predicted values for the regression line
+pred1 <- data.frame(Actual = train.df$Price, 
+                    Predicted = pred1.unscaled)
+
+# Review the variation between Actual and Predicted
+head(pred1)
+
+# Use ggplot to compare differences between Actual and Predicted
+ggplot(pred1, aes(x = Predicted, y = Actual)) +
+  geom_point() +
+  ggtitle("NN1 Training Actuals vs Predicted") +
+  geom_abline(intercept = 0, slope = 1, color = "blue", size = 1)
+
+# Create a linear model to review RMSE and other statistical  (reference from Statistical Modeling)
+pred1.lm = lm(Predicted ~ Actual, data = pred1)
+
+ # Use kable() to design table
+kable(forecast::accuracy(pred1.lm)) %>% kable_classic() %>% 
+  kableExtra::kable_styling(bootstrap_options = c("striped", "hover", "condensed","responsive")) %>%
+  kable_styling(position = "center")
+```
+**Resources:**   
+- https://statisticsglobe.com/plot-predicted-vs-actual-values-in-r  
+- https://www.analyticsvidhya.com/blog/2017/09/creating-visualizing-neural-network-in-r/  
+
+```{r}
+# Means and standard deviation and apply them to validation data - means could be slightly different than zero (predict probabilities) (page 197)
+val1 = predict(NN1, newdata = valid.norm.df) 
+
+# Applies function 'unscale.price' to the validation data
+val1.unscaled = unscale.price(val1)
+
+# Created a data frame for actual and predicted values for the regression line
+val1.pred <- data.frame(Actual = valid.df$Price,
+                        Predicted = val1.unscaled)
+
+# Review the variation between Actual and Predicted
+head(val1.pred)
+
+# Use ggplot to compare differences between Actual and Predicted
+ggplot(val1.pred, aes(x = Predicted, y = Actual)) +
+  geom_point() +
+  ggtitle("NN1 Validation Actuals vs Predicted") +
+  geom_abline(intercept = 0, slope = 1, color = "blue", size = 1)
+
+# Create a linear model to review RMSE and other statistical measures (reference from Statistical Modeling)
+val1.lm = lm(Predicted ~ Actual, data = val1.pred)
+
+# Use kable() to design table
+kable(forecast::accuracy(val1.lm)) %>% kable_classic() %>% 
+  kableExtra::kable_styling(bootstrap_options = c("striped", "hover", "condensed","responsive")) %>%
+  kable_styling(position = "center") 
+```
+
+An evaluation of the RMS error for each neural network needs to be taken into consideration because the analyst would like to understand how these models are performing. Therefore, I will give a brief overview of each NN built throughout this report for comparison. The NN1's training set with one layer and two nodes seems to be over fitting the predicted values as the actual prices are higher and lower than what was estimated. The points appear to be fairly  distributed  around the regressed diagonal, but more concentrated in the lower half with what to appears to be outliers in the upper right-hand corner. In the validation set for this NN1 model though, we see that it is performing worse with a RMSE of 1069.721. Outliers may be more abundant here, but in the validation chart, the price points are spread out more along the regression line. 
+
+*Record the RMS error for the training data and the validation data. Repeat the process, changing the number of hidden layers and nodes to {single layer with 5 nodes}, {two layers, 5 nodes in each layer}.* 
+
+### Neural Network: 1 Hidden Layer, 5 Nodes (Training)
+```{r,fig.width = 6, fig.height = 5}
+# Run a neural network with dummy variables (page 280)
+NN2 <- neuralnet(Price ~ 
+                  Age_08_04 + KM + HP + Automatic + Doors + Quarterly_Tax +
+                  Mfr_Guarantee + Guarantee_Period + Airco + Automatic_airco + 
+                  CD_Player + Powered_Windows + Sport_Model + Tow_Bar +
+                  Fuel_Type.Diesel + Fuel_Type.Petrol,
+                data = train.norm.df, 
+                hidden = 5,
+                linear.output = TRUE)
+
+# Plot network (page 280)
+plot(NN2, rep = "best")
+```
+
+One of the most basic types of neural nets is the Feed Forward (FF). This means that the nodes are fully connected, activation flows from input layer to output are without back loops, and there is only one layer between the input and output. Since it was requested that a single layer and five nodes were utilized, this is the same result as the FF. There are 17 nodes in the input layer that get condensed into five before the final prediction of price.
+
+**Resource:** https://towardsdatascience.com/the-mostly-complete-chart-of-neural-networks-explained-3fb6f2367464
+
+```{r}
+# Means and standard deviation and apply them to train data (predict probabilities) (page 197)
+pred2.train = predict(NN2, newdata = train.norm.df)
+
+# Applies function 'unscale.price' to the validation data
+pred2.unscaled = unscale.price(pred2.train)
+
+# Creates a data frame for actual and predicted values for the regression line
+pred2 <- data.frame(Actual = train.df$Price, 
+                    Predicted = pred2.unscaled)
+
+# Review the variation between Actual and Predicted
+head(pred2)
+
+# Use ggplot to compare differences between Actual and Predicted
+ggplot(pred2, aes(x = Predicted, y = Actual)) +
+  geom_point() +
+  ggtitle("NN2 Training Actuals vs Predicted") +
+  geom_abline(intercept = 0, slope = 1, color = "blue", size = 1)
+
+# Create a linear model to review RMSE and other statistical measures (reference from Statistical Modeling)
+pred2.lm = lm(Predicted ~ Actual, data = pred2)
+
+ # Use kable() to design table
+kable(forecast::accuracy(pred2.lm)) %>% kable_classic() %>% 
+  kableExtra::kable_styling(bootstrap_options = c("striped", "hover", "condensed","responsive")) %>%
+  kable_styling(position = "center")
+```
+
+Once again, we still a similar trend within the NN2 model. Both the training and validation RSMEs are over fitting the predicted values since they are below or above the actual price. The difference here though is that the training RSME has improved while the validation did not.
+
+```{r}
+# Means and standard deviation and apply them to validation data - means could be slightly different than zero (predict probabilities) (page 197)
+val2 = predict(NN2, newdata = valid.norm.df) 
+
+# Applies function 'unscale.price' to the validation data
+val2.unscaled = unscale.price(val2)
+
+# Created a data frame for actual and predicted values for the regression line
+val2.pred <- data.frame(Actual = valid.df$Price,
+                        Predicted = val2.unscaled)
+
+# Review the variation between Actual and Predicted
+head(val2.pred)
+
+# Use ggplot to compare differences between Actual and Predicted
+ggplot(val2.pred, aes(x = Predicted, y = Actual)) +
+  geom_point() +
+  ggtitle("NN2 Validation Actuals vs Predicted") +
+  geom_abline(intercept = 0, slope = 1, color = "blue", size = 1)
+
+# Create a linear model to review RMSE and other statistical measures (reference from Statistical Modeling)
+val2.lm = lm(Predicted ~ Actual, data = val2.pred)
+
+# Use kable() to design table
+kable(forecast::accuracy(val2.lm)) %>% kable_classic() %>% 
+  kableExtra::kable_styling(bootstrap_options = c("striped", "hover", "condensed","responsive")) %>%
+  kable_styling(position = "center") 
+```
+
+### Neural Network: 2 Hidden Layers, 5 Nodes (Training)
+```{r,fig.width = 6, fig.height = 5}
+# Run a neural network with dummy variables (page 280)
+NN3 <- neuralnet(Price ~ 
+                  Age_08_04 + KM + HP + Automatic + Doors + Quarterly_Tax +
+                  Mfr_Guarantee + Guarantee_Period + Airco + Automatic_airco + 
+                  CD_Player + Powered_Windows + Sport_Model + Tow_Bar +
+                  Fuel_Type.Diesel + Fuel_Type.Petrol,
+                data = train.norm.df, 
+                hidden = c(5,5),
+                linear.output = TRUE)
+
+# Plot network (page 280)
+plot(NN3, rep = "best")
+
+```
+Similar to the Feed Forward model is the Deep Feed Forward (DFF). The one difference is that there is more than one hidden layer. The assumptions of the FF apply to the DFF too such that nodes are fully connected, activation flows from input layer to output are without back loops, and there is only one layer between the input and output. Since it was requested that a two layers with five nodes each, this neural network is a bit more complex. There are 17 nodes in the input layer that get condensed into two layers of five nodes before the final prediction of price.  
+
+**Resource:** https://towardsdatascience.com/the-mostly-complete-chart-of-neural-networks-explained-3fb6f2367464
+
+```{r}
+# Means and standard deviation and apply them to train data (predict probabilities) (page 197)
+pred3.train = predict(NN3, newdata = train.norm.df)
+
+# Applies function 'unscale.price' to the validation data
+pred3.unscaled = unscale.price(pred3.train)
+
+# Creates a data frame for actual and predicted values for the regression line
+pred3 <- data.frame(Actual = train.df$Price, 
+                    Predicted = pred3.unscaled)
+
+# Review the variation between Actual and Predicted
+head(pred3)
+
+# Use ggplot to compare differences between Actual and Predicted
+ggplot(pred3, aes(x = Predicted, y = Actual)) +
+  geom_point() +
+  ggtitle("NN3 Training Actuals vs Predicted") +
+  geom_abline(intercept = 0, slope = 1, color = "blue", size = 1)
+
+# Create a linear model to review RMSE and other statistical measures (reference from Statistical Modeling)
+pred3.lm = lm(Predicted ~ Actual, data = pred3)
+
+ # Use kable() to design table
+kable(forecast::accuracy(pred3.lm)) %>% kable_classic() %>% 
+  kableExtra::kable_styling(bootstrap_options = c("striped", "hover", "condensed","responsive")) %>%
+  kable_styling(position = "center")
+```
+
+
+
+```{r}
+# Means and standard deviation and apply them to validation data - means could be slightly different than zero (predict probabilities) (page 197)
+val3 = predict(NN3, newdata = valid.norm.df) 
+
+# Applies function 'unscale.price' to the validation data
+val3.unscaled = unscale.price(val3)
+
+# Created a data frame for actual and predicted values for the regression line
+val3.pred <- data.frame(Actual = valid.df$Price,
+                        Predicted = val3.unscaled)
+
+# Review the variation between Actual and Predicted
+head(val3.pred)
+
+# Use ggplot to compare differences between Actual and Predicted
+ggplot(val3.pred, aes(x = Predicted, y = Actual)) +
+  geom_point() +
+  ggtitle("NN3 Validation Actuals vs Predicted") +
+  geom_abline(intercept = 0, slope = 1, color = "blue", size = 1)
+
+# Create a linear model to review RMSE and other statistical measures (reference from Statistical Modeling)
+val3.lm = lm(Predicted ~ Actual, data = val3.pred)
+
+# Use kable() to design table
+kable(forecast::accuracy(val3.lm)) %>% kable_classic() %>% 
+  kableExtra::kable_styling(bootstrap_options = c("striped", "hover", "condensed","responsive")) %>%
+  kable_styling(position = "center") 
+```
+
+In the NN3 model, we have the best RMSE out of all of the training sets. If the three networks are compared side-by-side, one could visually see that the price points are closet to the regression line. In terms of the validation errors though, they follow suite of NN1's validation set. This is due to how they are less concentrated in the lower price points, but spread across more so in the higher regions.  
+
+```{r,fig.width = 6, fig.height = 4}
+# Create matrix for stacked bar chart
+data <- as.matrix(data.frame("NN1" = c(1007.904, 1069.721),     
+                             "NN2" = c(921.1366, 1159.194),
+                             "NN3" = c(899.9473, 1086.563)))
+rownames(data) <- c("Training", "Validation")
+
+# Create grouped barchart
+barplot(data,                                         
+        col = c("#0000FF", "#353436"),
+        beside = TRUE, main = "Train and Validation RSM Error")
+
+ # Add legend to barplot
+legend("topleft",                                   
+       legend = c("Training", "Validation"),
+       fill = c("#0000FF", "#353436"))
+
+```
+
+**Resource:** https://statisticsglobe.com/barplot-in-r
+
+**i.** *What happens to the RMS error for the training data as the number of layers and nodes increases?*  
+
+| Neural Network            | RMSE     | 
+|---------------------------|----------|
+|  1 Hidden Layer, 2 Nodes  | 1007.904 |  
+|  1 Hidden Layer, 5 Nodes  | 921.1366 |  
+|  2 Hidden Layers, 5 Nodes | 899.9473 |  
+
+The RMSE allows us to measure how far predicted values are from observed values in a regression analysis. As the layers and nodes increase in the training set, the root-mean-squared error decreases. This inverse relationship can be seen above in the blue bars. Therefore, this means that the model performance improves.
+
+**ii.** *What happens to the RMS error for the validation data?*    
+
+
+| Neural Network            | RMSE     | 
+|---------------------------|----------|
+|  1 Hidden Layer, 2 Nodes  | 1069.721 | 
+|  1 Hidden Layer, 5 Nodes  | 1159.194 | 
+|  2 Hidden Layers, 5 Nodes | 1086.563 | 
+
+The opposite occurs in the validation data. If you review the black bars in the bar chart above, it can be seen that the networks and RMSE have  increase together. This indicates that the training data is starting to over fit with each iteration. The NN2 though is higher than the other two models.
+
+**iii.** *Comment on the appropriate number of layers and nodes for this application*  
+
+The appropriate number of hidden layers would be 2 with 5 nodes. As the book mentioned, 'the point of minimum validation error is a good indicator of the best number of iterations for training, and the weights at that stage are likely to provide the best error rate in new data' (page 283). The lower values of RMSE indicate better fit and is a good measure of how accurately the model predicts the response. Although the most popular choice of the number of hidden layers is one (page 286), we need to check how well the errors perform. I would not choose 1 layer with 2 nodes because the RMS error is the highest within the training data. That leaves two options left. My recommendation considers "a middle of the road approach" as the model we would choose has the lowest RMSE in the training data and a lower RMSE than the model that has 1 hidden and 5 nodes. 

@@ -1,0 +1,367 @@
+---
+title: "TP2_7.2"
+author: "Emily Schmidt"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r, message=FALSE, warning=FALSE}
+library(data.table) # Fast aggregation of large data sets and a fast file reader
+library(lubridate) # Commute date-times
+library(cowplot) # A simple add-on to ggplot
+library(caret) # Functions that attempt to streamline the process for creating predictive models
+library(kableExtra) # Add elements to a a pivot table
+library(reshape2) # Easily transform our data into whatever structure we may need
+library(fastDummies) # Provides a significant speed increase from creating dummy variables
+library(randomizr) # Generates random assignments for common experimental designs and random samples for common sampling designs
+library(FNN) # Used for KNN estimation
+library(tidyr) # Contains tools for changing the shape and hierarchy of a data set
+library(DataExplorer) # Used to graph missing value percentages
+
+```
+
+```{r, message=FALSE, warning=FALSE}
+setwd("C:\\Users\\emann\\GSEM Master\\Data Mining\\Homework 2") # Set directory
+getwd() # Check the working directory
+
+UniBank <- read.csv("UniversalBank.csv", sep = ",", header = T) # Load your data, UniversalBank
+
+options(scipen = 10000) # Avoid scientific notation
+```
+```{r, message=FALSE, warning=FALSE}
+dim(UniBank) # Get or set the dimension of the specified matrix, array or data frame
+head(UniBank) # Display the first n rows present in the input data frame
+View(UniBank) # Invoke a spreadsheet-style data viewer within RStudio
+summary(UniBank) # Produce result summaries of the results of various model fitting functions
+str(UniBank) # Compactly displaying the internal structure of a R object
+
+which(is.na(UniBank)) # Function returns the positions with missing values
+
+plot_missing(UniBank) # Plots the percentages of missing values
+```
+
+```{r}
+# Create a summary statistics table to show metrics, ensuring that missing values are not included
+CSUM <- data.frame(mean = sapply(UniBank[,c(2:4, 6:14)], mean,na.rm = T) 
+                ,median = sapply(UniBank[,c(2:4, 6:14)], median,na.rm = T)
+                ,min = sapply(UniBank[,c(2:4, 6:14)], min,na.rm = T)
+                ,max = sapply(UniBank[,c(2:4, 6:14)], max,na.rm = T)
+                ,sd = sapply(UniBank[,c(2:4, 6:14)], sd,na.rm = T))
+colnames(CSUM) = c("Mean","Median","Min","Max","Standard Deviation")
+CSUM
+```
+
+```{r}
+UniBank %>% gather() %>% head() # Reshaping the data which means it collects a set of column names and places them into a single “key” column
+
+UniBank_data <- UniBank[,-c(1,5)] # Remove ID and Zip from data to review quantitative values
+
+ggplot(gather(data = UniBank_data),aes(value)) +
+  geom_histogram(bins = 10, color = "white") + # Creates bin sizing and sets the lines as white
+  facet_wrap(~key,scales = "free") + # Converting the graphs into panels
+  ggtitle("Quantitative Variable Analysis") + # Title name
+  ylab("Count") + xlab("Value") + # Label names
+  theme_classic() # A classic theme, with x and y axis lines and no grid lines
+```
+
+One of the most important parts of analyzing your data is to conduct a preliminary exploratory review. The following points outline high-level conclusions:  
+- There are 5,000 observations and 14 variables within the raw data set.  
+- The data includes information on ID, age, years of professional experience, annual income, family size, average credit card amount/month, education level, mortgage value, and about the various accounts they could have.  
+- It can be noticed between the various accounts one can have, those variables are binary (Personal.Loan, Securities.Account, CD.Account, Online, and CreditCard).  
+- There are two types of variables: int and num. Later on, we will have to convert multiple to a factor in order to appropriate levels.  
+- Within the 12 quantitative variables, the mean, median, min, max, and standard deviation all differ. The mean for Age, Experience, Income, and Mortgage will have higher means as they have larger variance, while those that are binary variables will be between an average of 0-1.  
+- The unusual data point in the data table is the Education -3. Intuitively, we know that this value is not logical and will ignore as there may have been some intuition behind '-3'. Since I am not the subject matter expert, additional resources will be needed.
+- According the histograms, CCAvg, Income, and Mortgage are positively skewed. Variables that only have two bars at positions zero and one indicate those that are binary. Out of all the customer accounts, the one that stands out is Online, as the majority of Customers use the Online option while the other accounts have a larger quantity in zero or 'no'.
+
+# 7.2 Exercise  - Personal Loan Acceptance  
+Universal Bank is a relatively young bank growing rapidly in terms of overall customer acquisition. The majority of these customers are liability customers (depositors) with varying sizes of relationship with the bank. The customer base of asset customers (borrowers) is quite small, and the bank is interested in expanding this base rapidly to bring in more loan business. In particular, it wants to explore ways of converting its liability customers to personal loan customers (while retaining them as depositors). A campaign that the bank ran last year for liability customers showed a healthy conversion rate of over 9% success. This has encouraged the retail marketing department to devise smarter campaigns with better target marketing. The goal is to use k-NN to predict whether a new customer will accept a loan offer. This will serve as the basis for the design of a new campaign.  
+The file UniversalBank.csv contains data on 5000 customers. The data include customer demographic information (age, income, etc.), the customer’s relationship with the bank (mortgage, securities account, etc.), and the customer response to the last personal loan campaign (Personal Loan). Among these 5000 customers, only 480 (= 9.6%) accepted the personal loan that was offered to them in the earlier campaign. Partition the data into training (60%) and validation (40%) sets.  
+
+**A.** *Consider the following customer: Age = 40, Experience = 10, Income = 84, Family = 2, CCAvg = 2, Education_1 = 0, Education_2 = 1, Education_3 = 0, Mortgage = 0, Securities Account = 0, CD Account = 0, Online = 1, and Credit Card = 1. Perform a k-NN classification with all predictors except ID and ZIP code using k = 1. Remember to transform categorical predictors with more than two categories into dummy variables first. Specify the success class as 1 (loan acceptance), and use the default cutoff value of 0.5. How would this customer be classified?*
+
+```{r}
+UniBank$Education = as.factor(UniBank$Education) # treat Education as categorical (R will create dummy variables) (page 245)
+
+UniBank <- UniBank[,-c(1,5)] # Remove ID and Zip from data to review quantitative values (page 245)
+
+dummy <- dummyVars(~.,data = UniBank) # Creates a full set of dummy variables **
+
+bank_dummy <- as.data.frame(predict(dummy, newdata = UniBank)) # **
+
+bank_dummy$Personal.Loan = as.factor(bank_dummy$Personal.Loan) # treat Personal Loan as categorical (R will create dummy variables) (page 245)
+
+str(bank_dummy) # Used for compactly displaying the internal structure of a R object
+
+```
+
+
+```{r}
+pl_count <- table(bank_dummy$Personal.Loan) # Create frequency table
+
+prop.table(pl_count) # Calculates the value of each cell in a table as a proportion of all values
+```
+
+After removing ID and Zip Code from the UniBank data frame, I created dummy variables. Additionally, I factored the categorical value (Education) and variable of interest (Personal Loan). At the moment, there are 14 variables since Education is now broken into three levels, and Personal Loan has two levels to represent who has a loan (1) and who does not (0). Throughout this analysis, it is important to note the pre-existing distribution of Personal Loan. Above, you can see that the majority of our population falls under the level that has not accepted the personal loan that was offered to them at 90.4%. Even though 9.6% was given above, this calculation affirms their conclusion and these values can be used at a later point in the analysis.  
+**Resource**:  https://rdrr.io/cran/caret/man/dummyVars.html
+
+```{r}
+set.seed(1) #  Set the seed for the random number generator for reproducing the partition. (page 258)
+
+
+# Partitioning into training (60%) and validation (40%) (page 38)
+train.index <- sample(rownames(bank_dummy), 0.6*dim(bank_dummy)[1])
+train.df <- bank_dummy[train.index, ] # Collect all the columns with training rows into training set (page 38)
+
+valid.index <- setdiff(row.names(bank_dummy), train.index) # # Assign rows that are not already in the training set into validation (page 38)
+valid.df <- bank_dummy[valid.index, ] # Collect all the columns with validation rows into validation set (page 38)
+
+```
+
+```{r}
+train.part <- table(train.df$Personal.Loan) / pl_count  # Training set partition breakout
+format(train.part) # Treats the elements of a vector as character strings using a common format
+
+valid.part <- table(valid.df$Personal.Loan) / pl_count # Validation set partition breakout
+format(valid.part) # Treats the elements of a vector as character strings using a common format
+```
+
+These two tables represent the percentage of customers in the training and validation set, broken out by whether they have a loan (1) or do not (0). As the exercise requested, the data is approximately partitioned at a 60/40 split between sets. 
+
+```{r}
+# Initialize normalized training, validation data, complete data frames to originals (page 177)
+
+train.norm.df = train.df
+valid.norm.df = valid.df
+dummy.norm.df = bank_dummy
+
+# Use preProcess() from the caret package to normalize the quantitative variables (page 177)
+norm.values = preProcess(train.df[, c(1:5,9)], method=c("center", "scale")) # Standardize on train for continuous variables
+train.norm.df[, c(1:5,9)] = predict(norm.values, newdata = train.df[, c(1:5,9)]) # Means and standard deviation and apply them to train data (predict probabilities) (page 197)
+valid.norm.df[, c(1:5,9)] = predict(norm.values, newdata = valid.df[, c(1:5,9)]) # Means and standard deviation and apply them to validation data - means could be slightly different than zero (predict probabilities) (page 197)
+
+# Include customer features to categorize them
+new.df = data.frame(Age = 40, Experience = 10, Income = 84, Family = 2, CCAvg = 2, Education_1 = 0, Education_2 = 1, Education_3 = 0, Mortgage = 0, Securities.Account = 0, CD.Account = 0, Online = 1, CreditCard = 1)
+
+# Use knn() to compute K-nearest neighbors (page 177)
+
+new.norm.df = new.df
+new.norm.df[, c(1:5,9)] = predict(norm.values, newdata = new.df[, c(1:5,9)]) # means and standard deviation on what we want to test, in this case it would be the given customer (predict probabilities) (page 197)
+
+KNN1 = knn(train = train.norm.df[, -10], test = new.norm.df,
+          cl = train.norm.df[, 10], k = 1, prob = T) # (page 177)
+
+KNN1
+
+```
+
+According to the k-nearest-neighbors method, we can use this algorithm to classify a record or customer. Since it was requested that k = 1 is used, a reader must understand that this k may not perform as the best choice in terms of classification. This  will classify in a way that is very sensitive to the local characteristics of the training data. In regards to this customer, they would be considered part of the individuals who do not have a personal loan (0). Although I could not find any literature on the "nn.index" output, I would like to assume that since we removed ID, that the 1104 refers to the index of the nearest neighbor or closest observation. The .50 represents the distance to that neighbor from the observation to be classified. In order to see if k = 1 is the best choice, we will next check multiple ks and their frequencies to check if 1 is the best choice.  
+**Resource**: pages 176 and 177
+
+
+**B.** *What is a choice of k that balances between overfitting and ignoring the predictor information?*
+
+```{r}
+# Initialize a data frame with two columns: k, and accuracy (page 178)
+k_accuracy <- data.frame(k = seq(1, 20, 1), accuracy = rep(0, 20))
+
+# Compute KNN for different k on validation (page 178)
+for(i in 1:20) {
+  test1 <- knn(train = train.norm.df[,-10],test = valid.norm.df[,-10], cl = train.norm.df[,10], k = i, prob = T)
+  k_accuracy[i, 2] <- confusionMatrix(test1, valid.norm.df[,10])$overall[1]
+}
+k_accuracy
+```
+
+```{r}
+# Initialize a data frame with two columns: k, and accuracy. Used 20 since the k typically falls in range from 1 to 20.
+k_accuracy <- data.frame(k = seq(1, 20, 1), accuracy = rep(0, 20))
+              
+# Compute knn for different k on validation.
+for(i in 1:20) {
+  knn.pred = knn(train.norm.df[, -10], valid.norm.df[, -10],
+                  cl = train.norm.df[, 10], k = i)
+  
+  k_accuracy[i, 2] = confusionMatrix(knn.pred, valid.norm.df[, 10], positive = "1")$overall[1]
+}
+
+# Graphical representation of the best k
+plot(k_accuracy, type = "b", col = "purple", xlab = "k", ylab = "Accurary Level", 
+   main = "The Best k")
+
+```
+
+Choosing the right k is critical to ensure that the analyst does not over fit or ignore the predictor information. Typically, the k will fall within a certain range. For instance, 'the advantage of choosing k > 1 is that higher values of k provide smoothing that reduces the risk of overfitting due to noise in the training data. But, if k is too low, we may be fitting to the noise in the data. However, if k is too high, we will miss out on the method’s ability to capture the local structure in the data, one of its main advantages.(pages 177 to 178)  
+
+It is a simple balancing act! As mentioned before, there is a range that k should fall into, 1 to 20. When finding the accuracy for this data, k = 3 has the largest value at 0.9620. This can also be seen within the line chart above. Although k = 1 is close at 0.9160, we do not want to overfit by using just one nearest neighbor. By using k = 3, it maximizes our accuracy in the validation set.
+
+**C.** *Show the confusion matrix for the validation data that results from using the best k*
+
+```{r,fig.width = 8, fig.height=10}
+# Above's code with change the dimensions of the confusion matrix
+# Use knn() to compute K-nearest neighbors (page 177)
+KKN2.pred = knn(train.norm.df[, -10], valid.norm.df[, -10], cl = train.norm.df[, 10], k = 1)
+ 
+# Creates a confusion matrix plot **
+ConfusionTableR::binary_visualiseR(train_labels = KKN2.pred,
+                                   truth_labels= valid.norm.df[, 10],
+                                   class_label1 = "0", 
+                                   class_label2 = "1",
+                                   quadrant_col1 = "#E6E6FA", 
+                                   quadrant_col2 = "#6771C0", 
+                                   custom_title = "Confusion Plot Matrix, k = 1", 
+                                   text_col= "black")
+```
+
+```{r,fig.width = 8, fig.height=10}
+# Above's code with change the dimensions of the confusion matrix
+# Use knn() to compute K-nearest neighbors (page 177)
+KNN3.pred = knn(train.norm.df[, -10], valid.norm.df[, -10], cl = train.norm.df[, 10], k = 3)
+
+# Creates a confusion matrix plot **
+ConfusionTableR::binary_visualiseR(train_labels = KNN3.pred,
+                                   truth_labels= valid.norm.df[, 10],
+                                   class_label1 = "0", 
+                                   class_label2 = "1",
+                                   quadrant_col1 = "#E6E6FA", 
+                                   quadrant_col2 = "#6771C0", 
+                                   custom_title = "Confusion Plot Matrix, k = 3", 
+                                   text_col= "black")
+```
+
+The accuracy of this model at k = 1 is ~97%. In the two-class binary model, the Confusion Plot Matrix shows the distribution of predicted and actual values. There are 1,776 True Negatives and 59 False Negatives. On the other hand, there are 19 False Positives and 146 True Positives. The sensitivity is ~99% which means that the model has the ability to detect important class members correctly. This is especially important when the cost of False Negatives is high. The specificity is much lower at ~71%. When False Positives are zero, the specificity will be 1, which is a highly specific model. 
+
+When we compare k = 1 to k =3, the accuracy is the same at ~96%.  There are 1,792 True Negatives and 73 False Negatives. On the other hand, there are 3 False Positives and 132 True Positives. A True Positive rate also known as sensitivity. In this case it will be, TP/(TP+FN). For k = 3, it is higher than the last model at ~100%. This metric will show us that out of all actual customers how many are predicted correctly. The bank will need a high value for this. Ideally it should be 1, because it will be beneficial for the bank if they can predict who needs a personal loan. Additionally, False Positive rate is given by (FP/TN+FP), also known as as 1-specificity. A low value for FPR is preferred and it is represented as ~64%. Ideally it should be zero because a high value will mean that the bank will reject potentially good customers if the ML model is implemented, thereby reducing the overall business of the bank.  
+
+- True Positive (TN) - This is correctly classified as the class if interest / target.  
+- True Negative (TN) - This is correctly classified as not a class of interest / target.  
+- False Positive (FP) - This is wrongly classified as the class of interest / target.  
+- False Negative (FN) - This is wrongly classified as not a class of interest / target.  
+
+**Resource**: https://rdrr.io/cran/caret/man/dummyVars.html
+
+**D.** *Consider the following customer: Age = 40, Experience = 10, Income = 84, Family = 2, CCAvg = 2, Education_1 = 0, Education_2 = 1, Education_3 = 0, Mortgage = 0, Securities Account = 0, CD Account = 0, Online = 1 and Credit Card = 1. Classify the customer using the best k.*
+```{r}
+# Use knn() to compute K-nearest neighbors (page 177)
+new.bank_dummy2= data.frame(Age = 40, Experience = 10, Income = 84, Family = 2, CCAvg = 2, Education_1 = 0, Education_2 = 1, Education_3 = 0, Mortgage = 0, Securities.Account = 0, CD.Account = 0, Online = 1, CreditCard = 1)
+
+KNN2 <- knn(train = train.norm.df[,-10],test = new.norm.df, cl = train.norm.df[,10], k = 3, prob= T)
+
+KNN2
+```
+
+If we observe the same customer as above, but use k = 3, we continue to categorize them as a customer who did not accept a loan. The classification does not change since we maximized our accuracy in the validation set. Again, I will assume that 1104, 1187, and 1281 refers to the indices of the three closest neighbors and their corresponding "nn.dist" are their distances from the observation to be classified. This assumption is based off of page 176's scatterplot, the output on page 177, and Anastasia's assistance. If for instance we continue to add neighbors, that percentage of accuracy would decrease since k = 4 has an accuracy level less than k = 3. 
+
+**E.** *Repartition the data, this time into training, validation, and test sets (50% : 30% : 20%). Apply the k-NN method with the k chosen above. Compare the confusion matrix of the test set with that of the training and validation sets. Comment on the differences and their reason.*
+
+```{r}
+# Partitioning into training (50%), validation (30%), and test (20%) (page 38) - similar procedure in problem A, just added 'test'
+train.index <- sample(rownames(bank_dummy), 0.5*dim(bank_dummy)[1]) 
+train.df2 <- bank_dummy[train.index, ]
+
+valid.index <- sample(setdiff(rownames(bank_dummy),train.index), 0.3*dim(bank_dummy)[1])
+valid.df2 <- bank_dummy[valid.index, ]
+
+test.index = setdiff(rownames(bank_dummy), union(train.index, valid.index))
+test.df2 <- bank_dummy[test.index, ]
+```
+
+```{r}
+# Training set partition
+train.part2 <- table(train.df2$Personal.Loan) / pl_count  # Training set partition breakout
+format(train.part2) # Treats the elements of a vector as character strings using a common format
+```
+
+
+```{r}
+# Validation set partition
+valid.part2 <- table(valid.df2$Personal.Loan) / pl_count # Validation set partition breakout
+format(valid.part2) # Treats the elements of a vector as character strings using a common format
+```
+
+```{r}
+# Test set partition
+test.part2 <- table(test.df2$Personal.Loan) / pl_count # Test set partition breakout
+format(test.part2) # Treats the elements of a vector as character strings using a common format
+```
+
+Prior to reviewing the confusion matrices of the test set against the training and validation sets, the partitioning needs to be observed. Yet again, it is requested to split the data 50/30/20. If we consider these values as whole numbers, training should have 2,500 customers, validation at 1,500, and the remaining 1,000 clients in the test set. Although the our splits are not exactly whole, they are close enough to proceed with the analysis.
+
+```{r}
+# Initialize normalized training, validation data, complete data frames to originals (page 177)
+train2 = train.df2
+valid2 = valid.df2
+test2 = test.df2
+
+# Use preProcess() from the caret package for the quantitative variables
+norm.values2 = preProcess(train.df2[, c(1:5,9)], method=c("center", "scale"))
+train2[, c(1:5,9)] = predict(norm.values2, train.df2[, c(1:5,9)])
+valid2[, c(1:5,9)] = predict(norm.values2, valid.df2[, c(1:5,9)])
+test2[, c(1:5,9)] = predict(norm.values2, test.df2[, c(1:5,9)])
+
+```
+
+```{r,fig.width = 8, fig.height=10}
+# Above's code with change the dimensions of the confusion matrix
+# Use knn() to compute K-nearest neighbors for training data
+knn.pred.train = knn(train.df2[, -10], train.df2[, -10], cl = train.df2[, 10], k = 3)
+
+# Creates a confusion matrix plot **
+ConfusionTableR::binary_visualiseR(train_labels = knn.pred.train,
+                                   truth_labels= train.df2[, 10],
+                                   class_label1 = "0", 
+                                   class_label2 = "1",
+                                   quadrant_col1 = "#E6E6FA", 
+                                   quadrant_col2 = "#6771C0", 
+                                   custom_title = "Confusion Plot Matrix (Training)", 
+                                   text_col= "black")
+```
+
+
+```{r,fig.width = 8, fig.height=10}
+# Above's code with change the dimensions of the confusion matrix
+# Use knn() to compute K-nearest neighbors for validation data
+knn.pred.val = knn(train.df2[, -10], valid.df2[, -10], train.df2[, 10], k = 3)
+
+# Creates a confusion matrix plot **
+ConfusionTableR::binary_visualiseR(train_labels = knn.pred.val,
+                                   truth_labels= valid.df2[, 10],
+                                   class_label1 = "0", 
+                                   class_label2 = "1",
+                                   quadrant_col1 = "#E6E6FA", 
+                                   quadrant_col2 = "#6771C0", 
+                                   custom_title = "Confusion Plot Matrix (Validation)", 
+                                   text_col= "black")
+```
+
+```{r,fig.width = 8, fig.height=10}
+# Above's code with change the dimensions of the confusion matrix
+# Use knn() to compute K-nearest neighbors for test data
+knn.pred.test = knn(train.df2[, -10], test.df2[, -10], cl = train.df2[, 10], k = 3)
+
+# Creates a confusion matrix plot **
+ConfusionTableR::binary_visualiseR(train_labels = knn.pred.test,
+                                   truth_labels= test.df2[, 10],
+                                   class_label1 = "0", 
+                                   class_label2 = "1",
+                                   quadrant_col1 = "#E6E6FA", 
+                                   quadrant_col2 = "#6771C0", 
+                                   custom_title = "Confusion Plot Matrix (Test)", 
+                                   text_col= "black")
+```
+
+Similar to the exercises, we examine the differences not just between the training and validation sets, but we now introduce the test. There are three values that I will focus on: accuracy, sensitivity, and specificity. 
+
+| Model      | Accuracy | Sensitivity | Specificity
+|------------|----------|-------------|------------
+| Training   |   95%    |   99%       |   63%
+| Validation |   90%    |   96%       |   32%
+| Test       |   90%    |   97%       |   33%
+
+The validation set is used as part of the training process (to set k) and does not reflect a true holdout set as before. This is why we would want a third set to evaluate the performance of the method on data that is unseen. The test set generates classification on new records by re-evaluating the model. It is noticed that the three test features fall in between training and validation. This means that the test's performance is slightly better and the model worked well. It is typically expected though that the accuracy is lower in the test set. This is due to the model being trained and tuned on the train and validation sets. Therefore, overfitting is a possibility and that could lead to a higher accuracy. Additionally, an important part of this analysis is to reduce Type I and II errors. In the test set, it is seen that the False Negative (Type II) is 29 (up one from training), and False Positives (Type I) is at 72 compared to 85+ in both the training and validation sets. As test does not perform as well as training, it does better than validation when the parameters we used were the same throughout the analysis.  
+**Resource**:  https://rdrr.io/cran/caret/man/dummyVars.html
+
+

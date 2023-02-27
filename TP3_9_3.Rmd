@@ -1,0 +1,377 @@
+---
+title: "Exercise 9.3: Predicting Prices of Used Cars (Regression Trees)"
+author: "Emily Schmidt"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+**Completed exercise using the Data Mining textbook, not the errata.**
+
+```{r, message=FALSE, warning=FALSE}
+library(data.table) # Fast aggregation of large data sets and a fast file reader
+library(caret) # Functions that attempt to streamline the process for creating predictive models*
+library(reshape2) # Easily transform our data into whatever 
+library(tidyr) # Contains tools for changing the shape and hierarchy of a data set
+library(rpart) # Used for building classification and regression trees
+library(rpart.plot) # Automatically scales and adjusts the displayed tree for best fit
+library(rattle) # Graphical Data Interface
+library(RColorBrewer) # Contains a ready-to-use color palettes for creating beautiful graphics
+library(scales) # Convert value into a dollar amount
+library(Metrics) # RMSE()
+library(dplyr) # Select()
+library(tidyverse) # Rotate text labels
+theme_set(theme_bw(16)) # Rotate text labels
+```
+
+```{r, message=FALSE, warning=FALSE}
+setwd("C:\\Users\\emann\\GSEM Master\\Data Mining\\Homework 3") # Set directory
+getwd() # Check the working directory
+
+Toyota <- read.csv("ToyotaCorolla.csv", sep = ",", header = T) # Load your data, ToyotaCorolla
+```
+
+**Exploratory Analysis** was completed in Exercise 6.4. Please refer to that HTLM for further information on the ToyotaCorolla dataset.  
+
+**A.** *Run a regression tree (RT) with outcome variable Price and predictors Age_08_04, KM, Fuel_Type, HP, Automatic, Doors, Quarterly_Tax, Mfg_Guarantee, Guarantee_Period, Airco, Automatic_Airco, CD_Player, Powered_Windows, Sport_Model, and Tow_Bar. Keep the minimum number of records in a terminal node to 1, maximum number of tree levels to 100, and cp = 0.001, to make the run least restrictive.*  
+
+**i.** *. Which appear to be the three or four most important car specifications for predicting the car’s price?*  
+
+```{r}
+Toyota$Fuel_Type = as.factor(Toyota$Fuel_Type) # Creates dummy variable
+
+set.seed(1) #  Set the seed for the random number generator for reproducing the partition. (page 258)
+
+# Partitioning into training (60%) and validation (40%) (page 38)
+train.index <- sample(rownames(Toyota), 0.6*dim(Toyota)[1])
+train.df <- Toyota[train.index, ] # Collect all the columns with training rows into training set (page 38)
+
+valid.index <- setdiff(row.names(Toyota), train.index) # # Assign rows that are not already in the training set into validation (page 38)
+valid.df <- Toyota[valid.index, ] # Collect all the columns with validation rows into validation set (page 38)
+```
+
+We begin by distributing 60% of our data to the training set while the other 40% goes into validation. Training contains 861 observations while the other set has 575 Toyota Corollas.  
+
+```{r,fig.width = 6, fig.height = 3}
+# Create regression tree with "anova" and other specified parameters (page 224)
+RegressTree <- rpart(formula = Price ~ Age_08_04 + KM + Fuel_Type + HP + Automatic + Doors +
+              Quarterly_Tax + Mfr_Guarantee + Guarantee_Period + Airco +
+              Automatic_airco + CD_Player + Powered_Windows + Sport_Model + Tow_Bar,
+            data = train.df, method = "anova", 
+            control = rpart.control(minbucket = 1, maxdepth = 30, cp = 0.001)) 
+# Cannot run max 100 as the maximum depth is 30
+# Need to use anova since we are fitting a regression tree 
+
+RegressTree # Explains the splits
+
+printcp(RegressTree) # Generates a cost complexity parameter table that provides the complexity parameter value
+
+# Count number of leaves (page 221)
+length(RegressTree$frame$var[RegressTree$frame$var == "<leaf>"]) # 
+
+# Plots a regression tree
+fancyRpartPlot(RegressTree, caption = NULL, main = "Regression Tree", palettes = "GnBu", digits = -3)
+```
+
+After running the regression tree based on 15 car attributes, the model produces a tree with 34 terminal nodes and 861 observations at the root node. The first variable we split on optimizes a reduction in SSE (sum of squared errors). After reviewing the tree or the RegressTree output, it can be since that the first node is observations with Age_08_04 >= 32.5 with 743 used cars and an average price of $9,620.00. If one continues to follow the splits, the nodes will become smaller as they reach their terminal nodes. Additionally, we can see that the regression tree only utilized 10 variables out of the 15.  
+
+Since we are sticking to a cp = 0.0001, it is worth mentioning that this complexity parameter stops the growth of the tree. If we were to pick a value closer to zero, the tree would have many more terminal nodes which is more representative of the full tree. Since the depth is controlled, there will be less overall splits and prevents the tree from overfitting the training data. (page 221)
+
+**Resources:**  
+- https://uc-r.github.io/regression_trees  
+- https://bookdown.org/mpfoley1973/data-sci/regression-tree.html  
+
+```{r}
+# Calculates how much a given model "uses" that variable to make accurate predictions
+importance <- t(t(RegressTree$variable.importance)) # Transpose the matrix to create a column with the variable labels to acquire the importance of each
+
+# Visually see the variable importance within the tree
+plot(importance, main = "Variable Importance", col = "darkgreen", ylab = "Importance")
+
+importance # Print the importance table
+```
+
+Out of the 15 car specifications, there are several variables that are important for predicting car price. In the plot above, Age_08_04 is the most influential and truly stands apart from all other car attributes. If we review the next three, they are Automatic_airco, KM, and Quarterly_Tax. Another way to see that these are the top four predictors is by looking at the SSE in the RegressTree output as the second value demonstrates the importance of the variable. Hence why the reader will see that Age_08_04 is first in both analyses.  
+
+**ii.** *Compare the prediction errors of the training and validation sets by examining their RMS error and by plotting the two box plots. What is happening with the training set predictions? How does the predictive performance of the validation set compare to the training set? Why does this occur?*  
+
+```{r}
+
+# Prediction error for training set
+Regress_preds_cart_T <- predict(RegressTree, train.df, type = "vector")
+res_train <- train.df$Price - Regress_preds_cart_T
+
+# Create the RMSE calculation
+cs_rmse_T <- RMSE(
+   pred = Regress_preds_cart_T,
+   obs = train.df$Price)
+
+# Prediction error for validation set
+Regress_preds_cart_V <- predict(RegressTree, valid.df, type = "vector")
+res_valid <- valid.df$Price - Regress_preds_cart_V
+
+# Create the RMSE calculation
+cs_rmse_V <- RMSE(
+   pred = Regress_preds_cart_V,
+   obs = valid.df$Price)
+```
+
+```{r}
+cs_rmse_T # Print the training RMSE
+```
+
+```{r}
+cs_rmse_V # Print the validation RMSE
+```
+
+```{r}
+# Create a data frame from the training and validation errors in order to plot
+residual <-data.frame(residual = c(res_train, res_valid), 
+                 Set = c(rep("Training", length(res_train)), rep("Validation", length(res_valid))))
+
+# Boxplot graph showing the difference between the training and validation sets
+boxplot(residual ~ Set, data = residual, main = "RMS Errors", ylab = "Residual", col= "darkgreen", medcol = "green", boxlty = 0, border = "black", whisklty = 1, staplelwd = 4, outpch = 13, outcex = 1, outcol = "black")
+```
+
+'The RMS error (RMSE) (root-mean-squared error) is more informative of the error magnitude: it takes the square root of the average squared error, so it gives an idea of the typical error (whether positive or negative) in the same scale as that used for the original outcome variable. As we might expect, the RMS error for the validation data which the model is seeing for the first time in making these predictions, is larger than for the training data, which were used in training the model.' When comparing the two RMS errors scores (training at 987 and validation at 1193), the training set has a lower value, and thus, we expect it to predict the expected prices better. This is due to the validation using different observations than what the training utilized. Within the validation boxplot, more outliers are observed due to this explanation. As I stated before with the deeper tree with cp = 0, the RegressTree does not consider the full tree. So when we review the boxplots above,  the training mean will not be 1.  
+**Resources:**  
+- Pages 41 to 42  
+- https://bookdown.org/mpfoley1973/data-sci/regression-tree.html
+
+**iii.** *How can we achieve predictions for the training set that are not equal to the actual prices?*    
+We could achieve better validation predictive performance by pruning our regression tree. It reduces the size of decision trees by removing parts of the tree that do not provide power to classify instances. One difference between the full tree and the pruned is that fact that pruning consists of successively selecting a decision node and re-designating it as a terminal node. We will see this in the next answer for this exercise. 
+
+**iv.** *Prune the full tree using the cross-validation error. Compared to the full tree, what is the predictive performance for the validation set?*  
+As we continuously discuss the problem of overfitting, I wanted to demonstrate the dangers of how this could lead to poor performance on the test data if a deep tree were used. The issue is that the terminal nodes will be based on a very small number of records. According the the book (page 221), 'the class difference is likely to be attributed to noise rather than predictor information.' Although the tree below looks pretty neat, we want to prune and correctly fit our model for a specific number of splits. Although the analysis is not included due to the length, the output for 'Deeper.CT' shows the bottom values and how they represent the terminal nodes that are seen with values such as 0. We can visually see the difference of how the trees are built. The RegressTree has 34 terminal nodes while the Deeper.CT has 698.
+
+```{r, message=FALSE, warning=FALSE}
+# Create deep tree (page 219)
+Deeper.CT <- rpart(formula = Price ~ Age_08_04 + KM + Fuel_Type + HP + Automatic + Doors +
+              Quarterly_Tax + Mfr_Guarantee + Guarantee_Period + Airco +
+              Automatic_airco + CD_Player + Powered_Windows + Sport_Model + Tow_Bar,
+            data = train.df, method = "class", cp = 0, minsplit = 1)
+
+# Plot tree
+prp(Deeper.CT, type = 1, extra = 1, under = TRUE, split.font = 1, varlen = -10, main = "Deeper Tree", box.col=ifelse(Deeper.CT$frame$var == "<leaf>", 'gray', 'white'))
+
+# Count number of leaves (page 221)
+length(Deeper.CT$frame$var[Deeper.CT$frame$var == "<leaf>"])
+```
+
+To avoid overfitting, we use a technique called 'pruning.' This method allows the analyst to cut the tree to dismiss the weakest branches that do not really reduce the error rate. Therefore, these should be removed. It will be seen that from the RegressTree to the PrunedTree, we have re-designated a decision node as a terminal node. 
+
+```{r}
+#printcp(RegressTree) # Display the cp results
+#plotcp(RegressTree) # Cross Validation error
+
+# Create a table showing the various attributes to determine the best cp to prune the regression tree
+RegressTree$cptable %>%
+   data.frame() %>%
+   mutate(min_xerror_idx = which.min(RegressTree$cptable[, "xerror"]), rownum = row_number(), xerror_cap = RegressTree$cptable[min_xerror_idx, "xerror"] + RegressTree$cptable[min_xerror_idx, "xstd"], eval = case_when(rownum == min_xerror_idx ~ "Min Xerror", xerror < xerror_cap ~ "Under Cap", TRUE ~ "")) %>% select(-rownum, -min_xerror_idx) 
+
+plotcp(RegressTree, upper = "splits") # Provides a graphical representation to the cross validated error summary
+
+# Build a second regression tree
+RegressTree2 <- rpart(formula = Price ~ Age_08_04 + KM + Fuel_Type + HP + Automatic + Doors +
+              Quarterly_Tax + Mfr_Guarantee + Guarantee_Period + Airco +
+              Automatic_airco + CD_Player + Powered_Windows + Sport_Model + Tow_Bar,
+            data = train.df, method = "anova", 
+            control = rpart.control(minbucket = 1, maxdepth = 30, cp = 0)) # Set cp = 0 to obtain the full tree 
+
+# Prune by lower cp 0.003655782 based on plotcp(RegressTree,...)
+Pruned_tree <- prune(RegressTree2, cp= 0.003655782)
+
+Pruned_tree # Print the Pruned_Tree
+printcp(Pruned_tree) # Display the cp results
+
+# Plots a regression tree
+fancyRpartPlot(Pruned_tree, caption = NULL, main = "Classification Tree", palettes = "GnBu", digits = -3) 
+
+```
+
+There are various items that need to be unpacked to understand how the classification tree compares to the regression tree between validation sets. For starters, we first review what the smallest value for the complexity parameter is for the model. As the output displays graphical representation of the relationship between xerror and cp, the reader will notice that the maximum cp before the dashed line  (one standard deviation above the minimum error) is at cp = 0.003655782 (11 splits) which is under the cap under the 'eval' column. Additionally, there continue to be 861 observations since the Pruned_Tree is based on the training data. There are nine terminal nodes with the first split at Age_08_04 >= 33 which is slightly different than the RegressTree.  
+**Resource:** https://bookdown.org/mpfoley1973/data-sci/regression-tree.html
+
+```{r}
+# Calculates how much a given model "uses" that variable to make accurate predictions
+importance <- t(t(Pruned_tree$variable.importance)) # Transpose the matrix to create a column with the variable labels to acquire the importance of each
+importance # Print the importance table
+
+# Visually see the variable importance within the treee
+plot(importance, main = "Variable Importance", col = "darkgreen", ylab = "Importance")
+
+
+```
+
+The top four most influential variables continue to be Age_08_04, Automatic_airco, KM, and Quarterly_Tax. 
+
+```{r, message=FALSE, warning=FALSE}
+
+# Prediction error for training set
+Prune_preds_cart_T <- predict(Pruned_tree, train.df, type = "vector")
+
+# Calculate the RMSE for training
+cs_rmse_cart_T <- RMSE(
+   pred = Prune_preds_cart_T,
+   obs = train.df$Price)
+
+# Prediction error for validation set
+Prune_preds_cart_V <- predict(Pruned_tree, valid.df, type = "vector")
+
+# Calculate the RMSE for validation
+cs_rmse_cart_V <- RMSE(
+   pred = Prune_preds_cart_V,
+   obs = valid.df$Price)
+
+# Create a new data frame to plot Predicted and Actual values to visualize the differences
+data.frame(Predicted = Prune_preds_cart_V, Actual = valid.df$Price) %>%
+   ggplot(aes(x = Actual, y = Predicted)) +
+   geom_smooth() +
+   geom_point(alpha = 0.6, color = "cadetblue") +
+   geom_abline(intercept = 0, slope = 1, linetype = 2) +
+   labs(title = "Toyota Used Car, Predicted v. Actual")
+
+# Printing out the various outputs for RSME
+cat(paste("Regression Training RMSE: ",round(cs_rmse_T, 2)),paste("Regression Validation RMSE: ",round(cs_rmse_V, 2)),paste("Pruned Training RMSE:",round(cs_rmse_cart_T,2)),
+paste("Pruned Validation RMSE: ",round(cs_rmse_cart_V,2)),
+sep='\n')
+```
+
+The best pruned tree is obtained by fitting a full tree to the training data and pruning it with the cross-validation. The smallest tree needs to be within one standard error of the minimum xerror tree. These steps that were outlined in the book have been completed above. When creating the bins to classify price, the pruned training performs better than the validation (1,219.83 vs. 1,246.53). This is expected since the model is built off training data. But, the regression tree overall performs better than the pruned. The pruned should perform worse than the regression tree since we are not using as many predictors. The nine possible predicted values through do a decent job of binning the used cars by price as seen in the 'Toyota Used Car, Predicted v. Actual.'
+
+**Resource:** https://statinfer.com/203-3-10-pruning-a-decision-tree-in-r/
+
+**B.** *Let us see the effect of turning the price variable into a categorical variable. First, create a new variable that categorizes price into 20 bins. Now re-partition the data keeping Binned_Price instead of Price. Run a classification tree with the same set of input variables as in the RT, and with Binned_Price as the output variable. Keep the minimum number of records in a terminal node to 1.*  
+
+**i.** *Compare the tree generated by the CT with the one generated by the RT. Are they different? (Look at structure, the top predictors, size of tree, etc.) Why?*  
+
+```{r}
+# Categorize Price into 20 bins
+Binned_Price <- cut(Toyota$Price, breaks = 20, dig.lab = 10) # Came from stackover 
+
+# Add Binned_Price to Toyota
+Toyota <- cbind(Toyota, Binned_Price)
+
+# Split data into training and validation datasets
+train <- Toyota[train.index, ]
+valid <- Toyota[valid.index, ]
+
+# Run classification tree
+ClassTree <- rpart(Binned_Price ~ Age_08_04 + KM + Fuel_Type + HP + Automatic + Doors +
+              Quarterly_Tax + Mfr_Guarantee + Guarantee_Period + Airco +
+              Automatic_airco + CD_Player + Powered_Windows + Sport_Model + Tow_Bar,
+            data = train, method = "class", control = rpart.control(minbucket = 1))
+
+# Plots a regression tree
+fancyRpartPlot(ClassTree, caption = NULL, main = "Binned Classification Tree", palettes = "GnBu", digits = -3)  # Digits is used to remove scientific notation
+
+printcp(ClassTree) # Print cp 
+```
+
+```{r,fig.width = 12, fig.height = 6}
+# Create historgram from resource below
+ggplot(data = as_tibble(Binned_Price), mapping = aes(x=value)) + 
+  geom_bar(fill="darkgreen",color="white",alpha=0.7) + 
+  stat_count(geom="text", aes(label=sprintf("%.4f",..count../length(Binned_Price))), vjust=-0.5) +
+  labs(x='Binned Prices') +
+  labs(y='Frequency') +
+  coord_flip() +
+  ggtitle("Frequency of Binned Prices") +
+  theme_minimal()
+```
+
+```{r}
+# Calculates how much a given model "uses" that variable to make accurate predictions
+importance <- t(t(ClassTree$variable.importance)) # Transpose the matrix to create a column with the variable labels to acquire the importance of each
+importance # Print the importance table
+
+# Visually see the variable importance within the tree
+plot(importance, main = "Variable Importance", col = "darkgreen", ylab = "Importance")
+```
+
+'There are two fundamental differences between the classification and regression trees. The classification tree splits the response variable into mainly two classes 'Yes' or 'No', also can be numerically categorized as 1 or 0. The regression trees are leveraged in case where the response variable is either continuous or numeric, but not categorical.' In this problem, we use the regression tree in the case of used car prices. Therefore, the reader will notice that there are various differences between the two models. For starters, we are comparing price as a continuous variable while the classification treats it as a categorical value. This will change the layout of the overall trees as the RT is more complex and larger than the CT which has only eight terminal nodes compared to 34. Additionally, if we review the top predictors, even though both models consider 'Age_04_08' as the first, KM changes positions in the RT from three to two in the CT. The third predictor for CT is 'CD_Player' and the second most important variable for the regression tree is 'Automatic_airco'. It is also noticed that the two models use different variables. For instance, the regression tree uses 10 while CT only considers Age_08_04, KM, and Powered_Windows. The bar chart is useful to analyze how the prices are binned and the count of which used cars are within each. The biggest bin at over 400 observations is ($8,572.5 to $9,980].
+
+**Resources:**:  
+- https://medium.com/@gp_pulipaka/an-essential-guide-to-classification-and-regression-trees-in-r-language-4ced657d176b  
+- https://stackoverflow.com/questions/70814726/cut-function-puts-all-data-in-a-single-interval
+
+**ii.** *Predict the price, using the RT and the CT, of a used Toyota Corolla with the specifications listed in the below table.*  
+
+```{r}
+# Created the new car record
+new_car <- data.frame(Age_08_04 = 77, KM = 117000, Fuel_Type = "Petrol", HP = 110, Automatic = 0, Doors = 5, Quarterly_Tax = 100, Mfr_Guarantee = 0, Guarantee_Period = 3, Airco = 1, Automatic_airco = 0, CD_Player = 0, Powered_Windows = 0, Sport_Model = 0, Tow_Bar = 1)
+
+# Prediction with Regression 
+price.newcar_RT <- predict(RegressTree, newdata = new_car)
+price.newcar_RT # Print the price of regression
+
+# Prediction with Classification
+price.newcar_CT <- predict(ClassTree, newdata = new_car, type = "class")
+price.newcar_CT # Print the price of classification
+```
+
+When predicting the new used car's price, we obtain a value of $7,318 from the regression tree and a range of ($7,165 to $8,572.5] for the classification tree. The one disadvantage of the range value is that it approximates and doesn't give a definite value but what it would be if it were binned. We can see that the RT value falls within the CT range.
+
+**iii.** *Compare the predictions in terms of the predictors that were used, the magnitude of the difference between the two predictions, and the advantages and disadvantages of the two methods.*  
+
+**Regression Tree Top Predictors**  
+
+| Variable        | Importance Level |  
+|-----------------|------------------|  
+| Age_08_04       |   9885745349     |  
+| Automatic_airco |   2987651311     |  
+| KM              |   2886703313     |  
+| Quarterly_Tax   |   1885088412     |  
+
+**Classification Tree Top Predictors**   
+
+| Variable        | Importance Level |  
+|-----------------|------------------|  
+| Age_08_04       |   152.560        |  
+| KM              |   58.403         |  
+| CD_Player       |   26.995         |  
+| Automatic_airco |   19.859         |  
+
+**Regression Tree's variables actually used in tree construction:**  
+- Age_08_04  
+- Airco  
+- Automatic_airco  
+- CD_Player  
+- Doors            
+- Fuel_Type  
+- HP            
+- KM             
+- Powered_Windows   
+- Quarterly_Tax  
+
+
+**Classification Tree's variables actually used in tree construction:**  
+- Age_08_04  
+- KM              
+- Powered_Windows  
+
+Overall, the classification tree is less complex as it uses only three variables compared to the regression using ten. Per the information above, the top four most influential variables in each model include three of the four in each. Their magnitudes are similar in the fact that 'Age_04_08' dominates how important that car specification is while the other three are much lower. In terms of the CT, we bin a continuous variable into 20 ranges which might not produce optimal splits. Fortunately for both models, they compliment each other in the fact that we can use them to compare price results for a new car. Below, I will summarize the disadvantages and advantages of both models:
+
+Please note that some of these advantages and disadvantges can be for both trees.  
+**Regression Tree**
+- Can become very complex with a multitude of terminal nodes  
+-  Tree structure can be quite unstable, shifting substantially depending on
+the sample chosen  
+- A fully-fit tree will invariably lead to overfitting  
++ Predicts one value for exact price in terms of a new record  
+
+**Classification Tree**
+- Uses a price range for a new car which is not approximate, loses efficiency  
+- A small change in the data can cause a large change in the structure of the decision tree causing instability  
++ Focuses on less variables  
++ Due to its simplicity, it is easy to visualize, interpret, and manipulate  
++ Follows a non-parametric method  
+
+**Resource:** https://pythonprogramminglanguage.com/what-are-the-advantages-of-using-a-decision-tree-for-classification/#:~:text=Advantages%20of%20Using%20a%20Decision%20Tree%20for%20Classification&text=Due%20to%20its%20simplicty%2C%20anyone,easy%20to%20learn%20and%20understand.
+
+
+
+
+

@@ -1,0 +1,408 @@
+---
+title: 'TP 4: Acceptance of Consumer Loan'
+author: "Emily Schmidt"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r, message=FALSE, warning=FALSE}
+library(data.table) # Fast aggregation of large data sets and a fast file reader
+library(caret) # Functions that attempt to streamline the process for creating predictive models
+library(reshape2) # Easily transform our data into whatever structure we may need
+library(kableExtra) # Add elements to a a pivot table
+library(e1071) # Naive Bayes classification
+library(randomizr) # Simplifies the design and analysis of randomized experiments
+library(FNN) #  Fast Nearest Neighbor Search Algorithms and Applications
+library(tidyr) # Contains tools for changing the shape and hierarchy of a data set
+library(DataExplorer) # Used to graph missing value percentages
+library(pivottabler) # Enables pivot tables to be created and rendered/exported
+library(naniar) # Missing values 
+library(gains) # Constructs gains tables and lift charts for prediction algorithms
+library(rpart) # Used for building classification and regression trees
+library(rpart.plot) # Automatically scales and adjusts the displayed tree for best fit
+library(rattle) # Graphical Data Interface
+library(modeest) # Used for the function 'mfv'
+
+
+```
+
+## Problem 13.1
+
+### Preliminary Data Exploratory
+
+```{r, message=FALSE, warning=FALSE}
+# Set directory
+setwd("C:\\Users\\emann\\GSEM Master\\Data Mining\\Homework 4") 
+getwd() # Check the working directory
+
+# Load your data, UniversalBank
+UniBank <- read.csv("UniversalBank.csv", sep = ",", header = T) 
+```
+
+```{r, message=FALSE, warning=FALSE}
+dim(UniBank) # Dimensions of data
+colnames(UniBank) # List of all variables
+head(UniBank) # Display the first six rows 
+
+# Number of unique values in each variable
+t(t(sapply(UniBank, function(x) length(unique(x))))) 
+summary(UniBank) # Produce result summaries of all variables
+str(UniBank) # Compactly displaying the internal structure of a R object
+```
+
+#### Quick Summary - Part I
+
+- There are 5,000 observations and 14 variables within the raw data set.  
+- The data includes information on ID, age, years of professional experience, annual income, family size, average credit card amount/month, education level, mortgage value, and about the various accounts they could have.  
+- It is noticed that between the various accounts one can have, those variables are binary (Personal.Loan, Securities.Account, CD.Account, Online, and CreditCard).  
+- There are two types of variables: int and num. Later on, we will have to convert multiple to a factor in order to appropriate levels.  
+
+#### Missing Values Analysis
+
+```{r, message=FALSE, warning=FALSE}
+which(is.na(UniBank)) # Function returns the positions with missing values
+sum(is.na(UniBank))  # Sum the total amount of missing values in the data set
+
+# Visualize missing values
+gg_miss_var(UniBank) + ggtitle("Missing values")
+```
+
+There are no missing values. Any further analysis is not necessary. 
+
+#### Quick Summary - Part 2
+
+```{r}
+# Create a summary statistics table to show metrics, ensuring that missing values are not included
+CSUM <- data.frame(mean = sapply(UniBank[,c(2:4, 6:14)], mean,na.rm = T) 
+                ,median = sapply(UniBank[,c(2:4, 6:14)], median,na.rm = T)
+                ,min = sapply(UniBank[,c(2:4, 6:14)], min,na.rm = T)
+                ,max = sapply(UniBank[,c(2:4, 6:14)], max,na.rm = T)
+                ,sd = sapply(UniBank[,c(2:4, 6:14)], sd,na.rm = T))
+colnames(CSUM) = c("Mean","Median","Min","Max","Standard Deviation")
+kable(CSUM, align ="ccccccc") %>% kable_classic() # Final summary data frame
+```
+
+
+```{r, message=FALSE, warning=FALSE}
+# Remove ID and Zip from data to review quantitative values
+UniBank_data <- UniBank[,-c(1,5)] 
+
+UniBank_data %>% # Plot hist for all variables except 'shelf'
+  gather() %>%  # Convert to key (names of the original columns) & value (data held in columns) pairs
+  ggplot(aes(x = value)) +                   
+  geom_histogram(aes(y = ..density..), color = "black", fill = "lightblue") +  # Add histogram, scale y-axis
+  geom_density(alpha = 0.5, fill = "grey") + # Add density curve
+  facet_wrap(~ key, scales = "free") +  # In separate panels
+  theme_minimal()
+```
+
+- Within the 12 quantitative variables, the mean, median, min, max, and standard deviation all differ. The mean for 'Age', 'Experience', 'Income', and 'Mortgage' will have higher means as they have larger variance, while those that are binary variables will be between an average of 0-1.  
+- The unusual data in the data table is the 'Education' at -3. Intuitively, we know that this value is not logical and will ignore as there may have been some intuition behind '-3'. Since I am not the subject matter expert, additional resources will be needed.  
+- According the histograms, 'CCAvg', 'Income', and 'Mortgage' are positively skewed. Variables that only have two bars at positions zero and one indicate those that are binary. Out of all the customer accounts, the one that stands out is 'Online', as the majority of customers use the 'Online' option while the other accounts have a larger quantity in zero or 'no'.
+
+```{r}
+ # Drop ID and zip code columns (page 245)
+UniBank <- UniBank[ , -c(1, 5)] 
+
+# Treat Education as categorical (page 245)
+UniBank$Education <- factor(UniBank$Education, levels = c(1, 2, 3), labels = c("Undergrad", "Graduate", "Advanced/Professional"))
+
+# Ensure that Personal Loan is categorial
+UniBank$Personal.Loan = as.factor(UniBank$Personal.Loan)
+
+# Change variable format to factor 
+dummies = dummyVars(~ ., data = UniBank)                            
+# Create object for dummy variables (Anatasia's code)
+bank_dummy  = as.data.frame(predict(dummies, newdata = UniBank)) # exclude ID and ZIP.code variables
+
+# Results in three education dummy variables
+head(bank_dummy) 
+```
+Partitioning the data: 60% training, 40% validation
+```{r}
+set.seed(1) # Set the seed for the random number generator for reproducing the partition. (page 258)
+
+# Partitioning into training (60%) and validation (40%) (page 38)
+train.index <- sample(c(1:dim(UniBank)[1]), dim(UniBank)[1]*0.6)
+
+# Collect all the columns with training rows into training set (page 38)
+train.df <- UniBank[train.index, ]
+
+# Collect all the columns with validation rows into validation set (page 38)
+valid.df <- UniBank[-train.index, ]
+```
+
+#### Logistic Regression
+```{r}
+# Run logistic regression (page 245)
+# Use glm() (general linear model) with family = "binomial" to fit a logistic regression
+logit.reg <- glm(Personal.Loan ~ ., data = train.df, family =binomial(link="logit"))
+
+options(scipen=999)
+summary(logit.reg)
+
+```
+
+Out of the 12 quantitative variables, there are only eight that are statistically significant as their p-values do not exceed 0.05. Those are marked with asterisks to the right of their values. Additionally, the logistic regression coefficients give the change in the log odds of the outcome for a one unit increase in the predictor variable. For example, for every one unit change in age, the log odds of obtaining a personal loan decreases by 0.03245. Here are additional observations:  
+
+- The Residual Deviance has reduced by 1,133.29 with a loss of 12 degrees of freedom.  
+- It can be seen that Fisher Scoring iterations is at eight, meaning that eight iterations are needed to perform the fit.  
+- 'The Akaike Information Criterion (AIC) provides a method for assessing the quality of your model through comparison of related models.  
+
+**Resource:** https://www.theanalysisfactor.com/r-glm-model-fit/#:~:text=Fisher%20Scoring,-What%20about%20the&text=Fisher's%20scoring%20algorithm%20is%20a,iterations%20to%20perform%20the%20fit  
+
+#### Logistic Regression Confusion Matrix
+```{r}
+# Use predict() with type = "response" to compute predicted probabilities (page 248)
+logit.reg.pred <- predict(logit.reg, valid.df[, -8], type = "response")
+
+# Create confusion matrix for logistic regression (page 256)
+fourfoldplot(confusionMatrix(as.factor(ifelse(logit.reg.pred > 0.5, 1, 0)), valid.df$Personal.Loan)$table)
+
+```
+```{r}
+# Code to review the overall confusion matrix and statistics (page 256)
+predict_log <- ifelse(logit.reg.pred > 0.5, 1, 0)
+
+Logistic = confusionMatrix(as.factor(as.integer(predict_log)), valid.df$Personal.Loan, positive = "1")
+
+Logistic
+
+```
+
+The accuracy of the logistic regression model for the validation data is 95.80%. Later, the error rate will be calculated to show the comparison between each model's prediction of a personal loan.
+
+#### k-Nearest Neighbors
+```{r, message=FALSE, warning=FALSE}
+# Initialize normalized training, validation data, complete data frames to originals (page 177)
+
+train.norm.df = train.df
+valid.norm.df = valid.df
+dummy.norm.df = bank_dummy
+
+# Exclude Personal.Loan variable
+train_norm <- train.norm.df[,-10]    
+valid_norm <- valid.norm.df[,-10] 
+
+# Use preProcess() from the caret package to normalize the quantitative variables (page 177)
+norm.values = preProcess(train.df[, c(1:5,9)], method=c("center", "scale")) # Standardize on train for continuous variables
+
+# Means and standard deviation and apply them to train data (predict probabilities) (page 197)
+train.norm.df[, c(1:5,9)] = predict(norm.values, newdata = train.df[, c(1:5,9)]) 
+
+# Means and standard deviation and apply them to validation data - means could be slightly different than zero (predict probabilities) (page 197)
+valid.norm.df[, c(1:5,9)] = predict(norm.values, newdata = valid.df[, c(1:5,9)]) 
+
+```
+
+#### k-Nearest Neighbors Confusion Matrix
+```{r}
+set.seed(1) # Set the seed for the random number generator for reproducing the partition. (page 258)
+
+# Code for running k-NN algorithm (page 179)
+k_nn <- knn3(Personal.Loan ~ ., data = train.norm.df, k = 3)
+
+# Predict for validation data based off model
+predict_knn = predict(k_nn, valid.norm.df, type = "class")
+```
+
+```{r}
+# Create confusion matrix for logistic regression (page 256)
+fourfoldplot(confusionMatrix(predict_knn, valid.df$Personal.Loan)$table)
+
+# Code to review the overall confusion matrix and statistics
+KNN = confusionMatrix(data = predict_knn, valid.norm.df$Personal.Loan, positive = "1")
+
+KNN
+```
+
+The accuracy of the k-NN model for the validation data is 92.65%. Later, the error rate will be calculated to show the comparison between each model's prediction of a personal loan.
+
+#### Classifcation Tree
+```{r}
+# Build classification tree (page 213)
+class.tree <- rpart(Personal.Loan ~ ., data = train.df, method = "class")
+
+# Plot the classification tree (page 213)
+fancyRpartPlot(class.tree, caption = NULL, main = "Classification Tree", palettes = "GnBu", digits = -3)
+```
+
+Ran additional code to check if the Classification Tree was the best model. The reader will see that the 'Pruned' Classification Tree gave the same results as above.
+```{r}
+# Prune by lower cp (page 225)
+pruned.ct <- prune(class.tree,
+cp = class.tree$cptable[which.min(class.tree$cptable[,"xerror"]),"CP"])
+
+# Plot the pruned classification tree (page 213)
+fancyRpartPlot(pruned.ct, caption = NULL, main = "'Pruned' Classification Tree", palettes = "GnBu", digits = -3)
+
+```
+
+
+```{r}
+# Predict for validation data based off model
+pred_tree <- predict(class.tree, valid.df, type = "class")
+
+# Create confusion matrix for logistic regression (page 256)
+fourfoldplot(confusionMatrix(pred_tree, valid.df$Personal.Loan)$table)
+
+
+# Code to review the overall confusion matrix and statistics
+Tree = confusionMatrix(data = pred_tree, valid.df$Personal.Loan, positive = "1")
+
+Tree
+```
+The accuracy of the Classification Tree model for the validation data is 98.00%. Later, the error rate will be calculated to show the comparison between each model's prediction of a personal loan.
+
+**B.** *Create a data frame with the actual outcome, predicted outcome, and each of the three models. Report the first 10 rows of this data frame.*
+
+```{r}
+overall_df <-
+  data.frame(
+    Actual = valid.df[, 10],
+    Predicted_Logistic = as.factor(predict_log),
+    Predicted_knn = predict_knn,
+    Predicted_Tree = pred_tree
+  )
+
+kable(head(overall_df,10),align ="ccccccc", row.names = T, caption = "Data Frame") %>% 
+  kable_classic(full_width = T) 
+```
+
+A data frame has been created to combine all of the validation model's predictions into one table against the validation data. Within the 10 rows, there are two models (logistic and tree) that seem to have a different predictions for personal loan. It will be interesting to compare each models' error rates to determine which one an analyst would implement into their analysis.
+
+**C.** *Add two columns to this data frame for (1) a majority vote of predicted outcomes, and (2) the average of the predicted probabilities. Using the classifications generated by these two methods derive a confusion matrix for each method and report the overall accuracy.*
+
+```{r}
+# Logistic Regression matrix
+predict_log_prob = matrix(
+  data = NA,
+  nrow = dim(valid.df)[1],
+  ncol = 2,
+  dimnames = list(rownames(valid.df), c("0", "1"))
+)
+
+# Use predict() with type = "response" to compute predicted probabilities for 0 and 1 (page 248)
+predict_log_prob[, 2] <-
+  predict(logit.reg, valid.df[, -8], type = "response")
+
+predict_log_prob[, 1] <-
+  1 - predict(logit.reg, valid.df[, -8], type = "response")
+```
+
+```{r}
+# kNN matrix
+
+# Use predict() to compute predicted probabilities (page 248)
+predict_knn_prob = predict(k_nn, valid.norm.df, type = "prob")
+
+pred_knn_prob_matrix = matrix(
+  predict_knn_prob,
+  nrow = dim(valid.df)[1],
+  ncol = 2,
+  dimnames = list(rownames(valid.df), c("0", "1"))
+)
+
+```
+
+```{r}
+# Classification tree matrix
+
+# Use predict() to compute predicted probabilities (page 248)
+pred_tree_prob = predict(class.tree, valid.df)
+
+pred_tree_prob_matrix = matrix(
+  pred_tree_prob,
+  nrow = dim(valid.df)[1],
+  ncol = 2,
+  dimnames = list(rownames(valid.df), c("0", "1"))
+)
+```
+
+```{r}
+# Create the majority vote column by using apply() and function 'mfv'
+overall_df$majority_vote <- apply(overall_df[, c(2:4)], 1, mfv)
+
+# Create the average of predicted probabilities column by looping through each matrix for category 1 (personal loan)
+for (i in 1:dim(valid.df)[1]) {
+  overall_df$one_prob_avg[i] <-
+    (pred_knn_prob_matrix[i, 2] +  predict_log_prob[i, 2] + pred_tree_prob_matrix[i, 2]) /
+    3}
+
+# Create the average of predicted probabilities column by looping through each matrix for category 0 (no personal loan)
+for (i in 1:dim(valid.df)[1]) {
+  overall_df$zero_prob_avg[i] <-
+    (pred_knn_prob_matrix[i, 1] + predict_log_prob[i, 1] + pred_tree_prob_matrix[i, 1]) /3}
+
+prob_avg_group = ifelse(overall_df$one_prob_avg > 0.5, 1, 0)
+```
+
+```{r}
+# Create confusion matrix for logistic regression (page 256)
+fourfoldplot(confusionMatrix(as.factor(ifelse(prob_avg_group > 0.5, 1, 0)), valid.df$Personal.Loan)$table)
+
+# Create confusion matrix for ensemble 1
+ensemble1 = confusionMatrix(data = table(prob_avg_group, valid.df$Personal.Loan), positive = "1")
+
+ensemble1
+```
+
+The accuracy of the first ensemble model for the validation data is 97.45%. Later, the error rate will be calculated to show the comparison between each model's prediction of a personal loan.
+
+```{r}
+# Create confusion matrix for logistic regression (page 256)
+fourfoldplot(confusionMatrix(as.factor(ifelse(overall_df$majority_vote > 0.5, 1, 0)), valid.df$Personal.Loan)$table)
+
+# Create confusion matrix for ensemble 2
+ensemble2 = confusionMatrix(data = table(overall_df$majority_vote, valid.df$Personal.Loan), positive = "1")
+
+ensemble2
+```
+
+The accuracy of the second ensemble model for the validation data is 96.70%. Later, the error rate will be calculated to show the comparison between each model's prediction of a personal loan.  
+
+**D.** *Compare the error rates for the three individual methods and the two ensemble methods.*
+
+```{r,fig.width = 10, fig.height = 4}
+# Create matrix for stacked bar chart
+data1 <- as.matrix(data.frame(
+  "Logistic" = c(95.60),     
+  "k-NN" = c(92.65),
+  "Class Tree" = c(98.00),
+  "Ensemble 1 - Avg" = c(97.45),
+  "Ensemble 2 - Majority" = c(96.70)))
+
+# Create grouped barchart
+barplot(data1,                         
+        col = c("#93E9BE"),
+        beside = TRUE, main = "Model Accuracy")
+
+# Create matrix for stacked bar chart
+data2 <- as.matrix(data.frame(
+  "Logistic" = c(100-95.60),     
+  "k-NN" = c(100-92.65),
+  "Class Tree" = c(2.00),
+  "Ensemble 1 - Avg" = c(100-97.45),
+  "Ensemble 2 - Majority" = c(100-96.7)))
+
+# Create grouped barchart
+barplot(data2,                           
+        col = c("#69b3a2"),
+        beside = TRUE, main = "Model Error Rate")
+
+```
+
+| **Model**              |**Accuracy**|**Error Rate** | 
+|------------------------|------------|---------------|
+|  Logistic              | 95.60      | 4.40          |
+|  k-NN                  | 92.65      | 7.35          |
+|  Class Tree            | 98.00      | 2.00          |
+|  Ensemble 1 - Avg      | 97.45      | 2.55          |
+|  Ensemble 2 - Majority | 96.70      | 3.30          |
+
+
+Although these bar charts might not present the best visuals, it is an easy way to see that the accuracy rates for the five models are fairly close. If we look at the error rates (1-accuracy) though, it can be seen which model really performs the best. With an accuracy of 98.00%, the Classification Tree predicts the personal loan outcome with the most precision. The ensembles are fall closely behind unlike the k-NN model at a k = 3. If an analyst were to perform these methods on another data set, they may want to consider calcuating the ensembles over the logistic regression and k-nn models.

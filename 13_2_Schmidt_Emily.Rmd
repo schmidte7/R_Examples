@@ -1,0 +1,401 @@
+---
+title: "TP 4: eBay Auctions - Boosting and Bagging"
+author: "Emily Schmidt"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r, message=FALSE, warning=FALSE}
+library(data.table) # Fast aggregation of large data sets and a fast file reader
+library(dplyr) # Data manipulation operations such as applying filter
+library(tidyr) # Contains tools for changing the shape and hierarchy of a data set
+library(caret) # Functions that attempt to streamline the process for creating predictive models
+library(kableExtra)  # Tables
+library(RColorBrewer) # Tool to manage colors 
+library(gains) # Evaluate predctions for lift charts
+library(adabag) # bagging() and boosting()
+library(randomForest) # randomForest()
+library(naniar) # Missing values analysis
+library(rpart) # Used for building classification and regression trees
+library(rpart.plot) # Automatically scales and adjusts the displayed tree for best fit
+library(rattle) # fancyRpartPlot()
+library(lift) # TopDecileLift()
+```
+
+## Problem 13.2
+### Preliminary Data Exploratory
+
+```{r, message=FALSE, warning=FALSE}
+setwd("C:\\Users\\emann\\GSEM Master\\Data Mining\\Homework 4") # Set directory
+getwd() # Check the working directory
+
+ebay <- fread("eBayAuctions.csv", sep = ",", header = T) # Load your data, eBayAuctions.csv
+```
+
+```{r, message=FALSE, warning=FALSE}
+dim(ebay) # Dimensions of data
+colnames(ebay) # List of all variables
+head(ebay) # Display the first six rows 
+t(t(sapply(ebay, function(x) length(unique(x))))) # Number of unique values in each variable
+summary(ebay) # Produce result summaries of all variables
+str(ebay) # Compactly displaying the internal structure of a R object
+```
+
+#### Quick Summary - Part 1
+There are 1,972 observations and 8 variables. There is information on currency, duration, open and close prices, categories, etc. When calling summary(), it is noticed that there are various types of variables (chr, int, and num).
+
+#### Missing Values Analysis
+```{r, message=FALSE, warning=FALSE}
+# Visualize missing values
+gg_miss_var(ebay) + ggtitle("Missing Values")
+```
+
+There are zero missing values and therefore, we do not need to omit anything.
+
+#### Quick Summary - Part 2
+```{r, message=FALSE, warning=FALSE}
+# Create a summary statistics table to show metrics, ensuring that missing values are not included
+Summary <- data.frame(mean = sapply(ebay[,c(3:4, 6:8)], mean,na.rm = T) 
+                ,median = sapply(ebay[,c(3:4, 6:8)], median,na.rm = T)
+                ,min = sapply(ebay[,c(3:4, 6:8)], min,na.rm = T)
+                ,max = sapply(ebay[,c(3:4, 6:8)], max,na.rm = T)
+                ,sd = sapply(ebay[,c(3:4, 6:8)], sd,na.rm = T))
+colnames(Summary) = c("Mean","Median","Min","Max","Standard Deviation")
+rownames(Summary) <- names(ebay)[c(3:4, 6:8)] # Rename rows
+kable(Summary) %>% kable_classic() # Final summary data frame
+```
+
+```{r, message=FALSE, warning=FALSE}
+ebays <- ebay[, c(3:4, 6:8)] # Create data frame with numerical variables
+
+ebays %>% # Plot hist for all variables except "shelf"
+  gather() %>%  # Convert to key (names of the original columns) & value (data held in columns) pairs
+  ggplot(aes(x = value)) +                   
+  geom_histogram(aes(y = ..density..), color = "black", fill = "lightgreen") +  # Add histogram, scale y-axis
+  geom_density(alpha = 0.5, fill = "grey") + # Add density curve      
+  facet_wrap(~ key, scales = "free") +  # In separate panels
+  theme_minimal()
+```
+
+Between the summary statistics table and the histograms, there are several observations that are noteworthy:  
+- All of the quantitative variables have different scales. There are also three categorical variables ('Catergory', 'currency', and 'endday').  
+- 'Competitive' appears to be a binary variable (0 or 1).  
+- 'Duration' looks to have five bins (0.0, 2.5, 5, 7.5, and 10.0).
+- 'ClosePrice' and 'sellerRating' are skewed positively (right).  
+- To properly run the models after the Classification Tree, some values will need to be factored.
+
+**A.** *Run a classification tree, using the default controls of rpart(). Looking at the validation set, what is the overall accuracy? What is the lift on the first decile?*  
+
+```{r}
+# Factor categorical data for ensemble methods
+ebay$Category = as.factor(ebay$Category)
+ebay$currency = as.factor(ebay$currency)
+ebay$endDay = as.factor(ebay$endDay)
+ebay$Competitive = as.factor(ebay$Competitive)
+
+#  Set the seed for the random number generator for reproducing the partition. (page 258)
+set.seed(1)
+
+# Partitioning into training (60%) and validation (40%) (page 38)
+train.index <- sample(dim(ebay)[1], 0.6*dim(ebay)[1])
+train.ebay <- ebay[  train.index, ]
+
+# Assign rows that are not already in the training set into validation (page 38)
+valid.obs <- setdiff(rownames(ebay), train.index) 
+ # Collect all the columns with validation rows into validation set (page 38)
+valid.ebay <- ebay[ -train.index, ]
+```
+
+```{r}
+# Build classification tree (page 213)
+ClassTree <- rpart(Competitive ~ ., data = train.ebay, method = "class")
+
+# Plot the classification tree (page 213)
+fancyRpartPlot(ClassTree, caption = NULL, main = "Classification Tree", palettes = "GnBu", digits = -3)
+
+# Predict for validation data based off model
+pred_tree <- predict(ClassTree, valid.ebay, type = "class")
+
+ClassTree
+printcp(ClassTree) # Print cp 
+```
+
+```{r}
+# Calculates how much a given model "uses" that variable to make accurate predictions
+importance <- t(t(ClassTree$variable.importance)) # Transpose the matrix to create a column with the variable labels to acquire the importance of each
+
+# Visually see the variable importance within the tree
+plot(importance, main = "ClassTree Variable Importance", col = "darkgreen", ylab = "Importance")
+
+importance # Prints the importance table
+```
+
+The Classification Tree has 16 terminal nodes and 1,183 observations within the training set. The first split is on OpenPrice>=3.7 and whether or not that observation meets that criteria. In this model, it only uses five variables: 'Category', 'ClosePrice', 'currency', 'OpenPrice', and 'sellerRating'. In addition, the top three predictive values are 'ClosePrice', 'OpenPrice' and 'Catergory'.
+
+```{r}
+# Predict for validation data based off model
+pred_tree <- predict(ClassTree, valid.ebay, type = "class")
+
+# Create the confusion matrix 
+conf_mtrx1 <- confusionMatrix(pred_tree, as.factor(valid.ebay$Competitive), positive = "1")
+conf_mtrx1
+
+# Visualize confusion matrix
+fourfoldplot(conf_mtrx1$table, main = "Confusion Matrix - Classification Tree Validation", color = c("#009999", "#0066FFFF"))
+```
+
+The confusion matrix contains the following metrics: 
+
+- Accuracy: 81.50%  
+- Sensitivity (75.68%): Proportion of positive results out of the number of samples which were actually positive  
+- Specificity (87.70%): Proportion of true negatives that are correctly identified by the model 
+
+
+```{r, message=FALSE, warning=FALSE, fig.width = 11, fig.height = 4}
+par(mfrow=c(1,2)) # Set two plots side-by-side
+
+# Predict probabilities for the classification tree with the validation set
+pred_prob = predict(ClassTree, valid.ebay, type = "prob")
+
+# Create dataframe with the actual and probability values for the validation set
+ClassTreeDF = data.frame(actual = valid.ebay$Competitive, prob = predict(ClassTree, valid.ebay, type = "prob")[,2])
+
+# Compute gains for lift chart (page 138)
+gain <- gains(predicted = ClassTreeDF$prob, actual = as.numeric(as.character(ClassTreeDF$actual)), groups=dim(ClassTreeDF)[1], ties.method = c("first"))
+
+# Plot the lift chart (page 138)
+plot(c(0, gain$cume.pct.of.total*sum(as.numeric(as.character(ClassTreeDF$actual)))) ~ c(0, gain$cume.obs), main = "Gains Chart",
+xlab = "# Cases", ylab = "Cumulative", type="l")
+
+# Plot the lift chart diagonal (page 138)
+lines(c(0,sum(as.numeric(as.character(ClassTreeDF$actual)))) ~ c(0,dim(ClassTreeDF)[1]), lty = 2, col = "blue")
+
+# Compute deciles (page 249)
+gain.decile <- gains(predicted = ClassTreeDF$prob, actual = as.numeric(as.character(ClassTreeDF$actual)),ties.method = c("first"))
+
+# Plot decile-wise chart (page 249)
+barplot(gain.decile$mean.resp / mean(as.numeric(as.character(ClassTreeDF$actual))), names.arg = gain.decile$depth, main = "Decile-wise Lift Chart", xlab = "Percentile", ylab = "Mean Response")
+```
+
+Some useful tools for assessing model classification are the gains chrt and decile-wise lift chart. The “lift” over the base curve indicates for a given number of cases, the additional res ponders that you can identify by using the model. This helps derive good accuracy measures. The decile-wise lift chart takes 10% of the records that are ranked by the model as “most probable 1’s” yields 33 times as many 1’s as would simply selecting 10% of the records at random. The lift will vary with the number of records we choose to act on. A good classifier will give us a high lift when we act on only a few records.
+
+**Resource:** Pages 138, 144, and 198
+
+```{r}
+# Calculates the top-decile lift which expresses the incidence in 10% of observations 
+TopDecileLift(pred_prob[,2], valid.ebay$Competitive)
+```
+The TopDecileLift() function allows a user to calculate the top-decile lift, a metric that expresses how the incidence in the 10% customers with the highest model predictions compares to the overall sample incidence. A lift of 1 is expected for a random model. For this classification tree though, a lift of 1.914 indicates that in the 10% highest predictions, roughly two times more positive cases are identified by the model than would be expected for a random selection of instances. 
+
+**Resource:** https://rdrr.io/cran/CustomerScoringMetrics/man/topDecileLift.html
+
+
+**B.** *Run a boosted tree with the same predictors (use function boosting() in the adabag package). For the validation set, what is the overall accuracy? What is the lift on the first decile?*  
+
+```{r}
+# Code for running boosted tree (page 231)
+boost <- boosting(Competitive ~ ., data = train.ebay[, c(-1)])
+
+# Predict for validation data based off model (page 231)
+pred_boost <- predict(boost, valid.ebay)
+
+# Create the confusion matrix  (page 231)
+conf_mtrx2 <- confusionMatrix(as.factor(pred_boost$class), as.factor(valid.ebay$Competitive), positive = "1")
+
+conf_mtrx2
+
+# Visualize confusion matrix
+fourfoldplot(conf_mtrx2$table, main = "Confusion Matrix - Boosting", color = c("#009999", "#0066FFFF"))
+```
+
+The confusion matrix contains the following metrics:  
+
+- Accuracy: 91.25%  
+- Sensitivity: 91.40%   
+- Specificity: 91.10%   
+
+```{r, message=FALSE, warning=FALSE, fig.width = 11, fig.height = 4}
+par(mfrow=c(1,2)) # Set two plots side-by-side
+
+# Create dataframe with the actual and probability values for the validation set
+Boost_Tree = data.frame(actual = valid.ebay$Competitive, prob = pred_boost$prob[,2])
+
+# Compute gains for lift chart (page 138)
+gain <- gains(predicted = Boost_Tree$prob, actual = as.numeric(as.character(Boost_Tree$actual)), groups=dim(Boost_Tree)[1])
+
+# Plot the lift chart (page 138)
+plot(c(0, gain$cume.pct.of.total*sum(as.numeric(as.character(Boost_Tree$actual)))) ~ c(0, gain$cume.obs), main = "Gains Chart",
+xlab = "# Cases", ylab = "Cumulative", type="l")
+
+# Plot the lift chart diagonal (page 138)
+lines(c(0,sum(as.numeric(as.character(Boost_Tree$actual)))) ~ c(0,dim(Boost_Tree)[1]), lty = 2, col = "blue")
+
+# Compute deciles (page 249)
+gain.decile <- gains(predicted = Boost_Tree$prob, actual = as.numeric(as.character(Boost_Tree$actual)),ties.method = c("first"))
+
+# Plot decile-wise chart (page 249)
+barplot(gain.decile$mean.resp / mean(as.numeric(as.character(Boost_Tree$actual))), names.arg = gain.decile$depth, main = "Decile-wise Lift Chart", xlab = "Percentile", ylab = "Mean Response")
+```
+
+```{r}
+# Predict probabilities for the boosted tree with the validation set
+pred_boost <- predict(boost, valid.ebay, type = "prob")
+
+# Calculates the top-decile lift which expresses the incidence in 10% of observations 
+TopDecileLift(pred_boost$prob[,2], valid.ebay$Competitive)
+```
+
+For this model, it has a lift of 1.939. The value for boosted trees is slightly higher than Classification Trees which shows how positive cases are identified by the model than would be expected for a random selection of instances. 
+
+**C.** *Run a bagged tree with the same predictors (use function bagging() in the adabag package). For the validation set, what is the overall accuracy? What is the lift on the first decile?*  
+```{r}
+# Code for running bagging tree (page 231)
+bagged <- bagging(Competitive ~ ., data = train.ebay)
+
+# Predict for validation data based off model (page 231)
+pred_bagged <- predict(bagged, valid.ebay)
+
+# Create the confusion matrix  (page 231)
+conf_mtrx3 <-confusionMatrix(as.factor(pred_bagged$class), as.factor(valid.ebay$Competitive), positive = "1")
+
+conf_mtrx3
+
+# Visualize confusion matrix
+fourfoldplot(conf_mtrx3$table, main = "Confusion Matrix - Bagged", color = c("#009999", "#0066FFFF"))
+```
+
+The confusion matrix contains the following metrics:  
+
+- Accuracy: 86.82%  
+- Sensitivity: 83.29%   
+- Specificity: 90.58%   
+
+```{r, message=FALSE, warning=FALSE, fig.width = 11, fig.height = 4}
+par(mfrow=c(1,2)) # Set two plots side-by-side
+
+# Create dataframe with the actual and probability values for the validation set
+Bagged_Tree = data.frame(actual = valid.ebay$Competitive, prob = pred_bagged$prob[,2])
+
+# Compute gains for lift chart (page 138)
+gain <- gains(predicted = Bagged_Tree$prob, actual = as.numeric(as.character(Bagged_Tree$actual)), groups=dim(Bagged_Tree)[1])
+
+# Plot the lift chart (page 138)
+plot(c(0, gain$cume.pct.of.total*sum(as.numeric(as.character(Bagged_Tree$actual)))) ~ c(0, gain$cume.obs), main = "Gains Chart",
+xlab = "# Cases", ylab = "Cumulative", type="l")
+
+# Plot the lift chart diagonal (page 138)
+lines(c(0,sum(as.numeric(as.character(Bagged_Tree$actual)))) ~ c(0,dim(Bagged_Tree)[1]), lty = 2, col = "blue")
+
+# Compute deciles (page 249)
+gain.decile <- gains(predicted = Bagged_Tree$prob, actual = as.numeric(as.character(Bagged_Tree$actual)),ties.method = c("first"))
+
+# Plot decile-wise chart (page 249)
+barplot(gain.decile$mean.resp / mean(as.numeric(as.character(Bagged_Tree$actual))), names.arg = gain.decile$depth, main = "Decile-wise Lift Chart", xlab = "Percentile", ylab = "Mean Response")
+```
+
+```{r}
+# Predict probabilities for the boosted tree with the validation set
+pred_bagged <- predict(bagged, valid.ebay, type = "prob")
+
+# Calculates the top-decile lift which expresses the incidence in 10% of observations 
+TopDecileLift(pred_bagged$prob[,2], valid.ebay$Competitive)
+```
+
+For this model, it has a lift of 1.939. The value for bagged trees is slightly higher than Classification Trees, but has the same lift as the boosted tree. This shows how positive cases are identified by the model than would be expected for a random selection of instances.
+
+**D.** *Run a random forest (use function randomForest() in package randomForest with argument mtry = 4). Compare the bagged tree to the random forest in terms of validation accuracy and lift on first decile. How are the two methods conceptually different?* 
+
+```{r}
+# Code for running random forest
+RF <- randomForest(train.ebay$Competitive ~ ., data = train.ebay, mtry4 = )
+
+# Predict for validation data based off model (page 231)
+pred_RF <- predict(RF, valid.ebay)
+
+# Create the confusion matrix  (page 231)
+conf_mtrx4 <-confusionMatrix(as.factor(pred_RF), valid.ebay$Competitive, positive = "1")
+
+conf_mtrx4
+
+# Visualize confusion matrix
+fourfoldplot(conf_mtrx4$table, main = "Confusion Matrix - Random Forest", color = c("#009999", "#0066FFFF"))
+```
+
+The confusion matrix contains the following metrics:  
+
+- Accuracy: 85.93%  
+- Sensitivity: 86.98%   
+- Specificity: 84.82% 
+
+```{r, message=FALSE, warning=FALSE, fig.width = 11, fig.height = 4}
+par(mfrow=c(1,2)) # Set two plots side-by-side
+
+# Predict probabilities for the bagged tree with the validation set
+pred_RF <- predict(RF, valid.ebay, type = "prob")
+
+# Create dataframe with the actual and probability values for the validation set
+RF_Tree = data.frame(actual = valid.ebay$Competitive, prob = pred_RF[,2])
+
+# Compute gains for lift chart (page 138)
+gain <- gains(predicted = RF_Tree$prob, actual = as.numeric(as.character(RF_Tree$actual)), groups=dim(RF_Tree)[1])
+
+# Plot the lift chart (page 138)
+plot(c(0, gain$cume.pct.of.total*sum(as.numeric(as.character(RF_Tree$actual)))) ~ c(0, gain$cume.obs), main = "Gains Chart",
+xlab = "# Cases", ylab = "Cumulative", type="l")
+
+# Plot the lift chart diagonal (page 138)
+lines(c(0,sum(as.numeric(as.character(RF_Tree$actual)))) ~ c(0,dim(RF_Tree)[1]), lty = 2, col = "blue")
+
+# Compute deciles (page 249)
+gain.decile <- gains(predicted = RF_Tree$prob, actual = as.numeric(as.character(RF_Tree$actual)),ties.method = c("first"))
+
+# Plot decile-wise chart (page 249)
+barplot(gain.decile$mean.resp / mean(as.numeric(as.character(RF_Tree$actual))), names.arg = gain.decile$depth, main = "Decile-wise Lift Chart", xlab = "Percentile", ylab = "Mean Response")
+```
+
+```{r}
+# Calculates the top-decile lift which expresses the incidence in 10% of observations 
+TopDecileLift(pred_RF[,2], valid.ebay$Competitive)
+```
+
+For the random forest, it has a lift of 1.939. It is seen once again that it has the same value as the boosted and the bagged models. 
+
+```{r,fig.width = 10, fig.height = 4}
+# Create matrix for stacked bar chart
+data1 <- as.matrix(data.frame(
+  "Class Tree" = c(81.50),     
+  "Boosting" = c(91.25),
+  "Bagging" = c(86.82),
+  "Random Forest" = c(85.42)))
+
+# Create grouped barchart
+barplot(data1,                         
+        col = c("#93E9BE"),
+        beside = TRUE, main = "Model Accuracy")
+
+# Create matrix for stacked bar chart
+data2 <- as.matrix(data.frame(
+  "Class Tree" = c(1.914),     
+  "Boosting" = c(1.939),
+  "Bagging" = c(1.939),
+  "Random Forest" = c(1.939)))
+
+# Create grouped barchart
+barplot(data2,                           
+        col = c("#69b3a2"),
+        beside = TRUE, main = "Lift Value")
+```
+
+
+| **Model**       |**Accuracy**|**Lift Value** | 
+|-----------------|------------|---------------|
+|  Class Tree     | 81.50      | 1.914         |
+|  Boosted        | 91.25      | 1.939         |
+|  Bagged         | 86.82      | 1.939         |
+|  Random Forest  | 85.42      | 1.939         |
+
+Bagging is an ensemble algorithm that fits multiple models on different subsets of a training dataset, then combines the predictions from all models. 'Bagging improves the performance stability of a model and helps avoid overfitting by separately modeling different data samples and then combining the results' (page 315). Random forest is an extension of bagging that also randomly selects subsets of features used in each data sample. Overall, random forests go a step further than bagging because they build multiple decision tress and aggregate the to produce an accurate results with grater diversity. The lift on both models is 1.939 but the accuracy on the bagging model is 86.82% compared to 85.42%. Therefore, the bagging model performs slightly better than the random forest.

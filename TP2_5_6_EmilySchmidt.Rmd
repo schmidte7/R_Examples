@@ -1,0 +1,63 @@
+---
+title: "TP2 5.6"
+author: "Emily Schmidt"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r, message=FALSE, warning=FALSE}
+library(data.table) # Fast aggregation of large data sets and a fast file reader
+library(lubridate) # Commute date-times
+```
+
+
+# 5.6 Exercise  
+ A firm that sells software services has been piloting a new product and has records of 500 customers who have either bought the services or decided not to. The target value is the estimated profit from each sale (excluding sales costs). The global mean is $2,500. However, the cost of the sales effort is not cheap—the company figures it comes to $2,500 for each of the 500 customers (whether they buy or not). The firm developed a predictive model in hopes of being able to identify the top spenders in the future. The lift and decile charts for the validation set are shown in Figure 5.13.  
+
+**A.** *If the company begins working with a new set of 1,000 leads to sell the same services, similar to the 500 in the pilot study, without any use of predictive modeling to target sales efforts, what is the estimated profit?*
+
+```{r}
+# Calculate the estimated profit by plugging in values within various formulas.
+
+leads = 1000
+mean_G = 2500
+cost = 2500
+
+estimated_profit = leads*mean_G
+estimated_profit 
+
+sales = leads*cost
+sales
+
+profit_sales = estimated_profit - sales
+profit_sales
+```
+
+If the firm begins working with 1,000 leads at a global average of $2,500, the estimated profit would be $2,500,000. But, we also know the sales effort (cost of $2,500/person) equates to $2,500,000. Therefore, the total profit would be $0. We need to take into consideration that we are looking at the global mean. The likelihood of the business actually having no gain or loss of profit is not realistic because there will be cases where sales could be higher or lower than the global mean per customer. I suggest that the company should build a quality model to predict who their actual top spenders are based on the validation set.
+
+**B.** *If the firm wants the average profit on each sale to at least double the sales effort cost, and applies an appropriate cutoff with this predictive model to a new set of 1,000 leads, how far down the new list of 1000 should it proceed (how many deciles)?*  
+
+If the firm wishes to achieve at least double of their global mean, they would target the first decile because choosing the top 10% of observations would give the highest average profit on each sale. Additionally, this can be calculated by looking at the lift chart. Take 10% of the leads, and find that position on the lift chart. If an analyst divides those two values, a value greater than 2.0 will be achieved, which also aligns within the first decile.  
+**Reference:** Page 122
+
+**C.** *Still considering the new list of 1,000 leads, if the company applies this predictive model with a lower cutoff of $2,500, how far should it proceed down the ranked leads, in terms of deciles?*  
+
+In a quality model, you want to see the staircase effect because this means that the model is correctly "binned" in terms of who is more likely to purchase a software service or not. The staircase effect is simply observing that the bars are descending in order from left to right. Since we already know that model is not optimal and see an uptick from 50% to 60%,  the firm would want to target the sixth decile of customers to obtain their goal.  
+**Resource:** 'How to Interept a Decile Analysis'
+
+
+**D.** *Why use this two-stage process for predicting sales—why not simply develop a model for predicting profit for the 1000 new leads?*  
+Here are the reasons why an analyst would want to use a two-stage process for predicting sales:  
+1. 'The hold-out or validation sample is scored according to the model being tested.  
+2. The records are sorted by their predicted scores in descending order and divided into ten equal-sized bins or deciles. The top decile contains 10% of the population most likely to purchase a service and the bottom decile contains 10% of the population least likely to participate, based on the model scores.'  
+
+By completing these two steps, it is easy to see the difference between predicted and actual values due to the patterns within the bars. From earlier, we know that not all customers purchase at the global mean of $2,500. Therefore, we need to ensure we take this into account which is why we use this process. This way, the firm can minimize cost, maximize value, and save overall resources.  
+**Resource:** 'How to Interept a Decile Analysis' (https://www.rapidinsight.com/blog/how-to-interpret-a-decile-analysis/)
+
+
+
+

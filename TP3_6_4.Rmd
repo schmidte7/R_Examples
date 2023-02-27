@@ -1,0 +1,289 @@
+---
+title: 'Exercise 6.4: Predicting the Price of Used Toyota Corolla Cars'
+author: "Emily Schmidt"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+**Completed exercise using the Data Mining textbook, not the errata.**
+
+```{r, message=FALSE, warning=FALSE}
+library(data.table) # Fast aggregation of large data sets and a fast file reader
+library(lubridate) # Commute date-times
+library(cowplot) # A simple add-on to ggplot
+library(caret) # Functions that attempt to streamline the process for creating predictive models
+library(kableExtra) # Add elements to a a pivot table
+library(reshape2) # Easily transform our data into whatever structure we may need
+library(fastDummies) # Provides a significant speed increase from creating dummy variables
+library(randomizr) # Generates random assignments for common experimental designs and random samples for common sampling designs
+library(FNN) # Used for KNN estimation
+library(tidyr) # Contains tools for changing the shape and hierarchy of a data set
+library(DataExplorer) # Used to graph missing value percentages
+library(dbplyr) # Transposed version of print()*
+library(forecast) # Use with predict()*
+library(leaps) # Use with regsubets()*
+
+```
+
+```{r, message=FALSE, warning=FALSE}
+setwd("C:\\Users\\emann\\GSEM Master\\Data Mining\\Homework 3") # Set directory
+getwd() # Check the working directory
+
+Toyota <- read.csv("ToyotaCorolla.csv", sep = ",", header = T) # Load your data, ToyotaCorolla
+
+options(scipen = 10000) # Avoid scientific notation
+```
+
+#### Data Overview
+Predicting Prices of Used Cars. The file ToyotaCorolla.csv contains data on used cars (Toyota Corolla) on sale during late summer of 2004 in the Netherlands. It has 1,436 records containing details on 39 attributes, including Price, Age, Kilometers, HP, and other specifications. The goal is to predict the price of a used Toyota Corolla based on its specifications. (The example in Section 6.3 is a subset of this dataset.) Split the data into training (50%), validation (30%), and test (20%) datasets. Run a multiple linear regression with the outcome variable Price and predictor variables Age_08_04, KM, Fuel_Type, HP, Automatic, Doors, Quarterly_Tax, Mfr_Guarantee, Guarantee_Period, Airco, Automatic_airco, CD_Player, Powered_Windows, Sport_Model, and Tow_Bar.
+
+## Data Exploration
+```{r,fig.width = 6, fig.height=10}
+dim(Toyota) # Get or set the dimension of the specified matrix, array or data frame
+head(Toyota) # Display the first n rows present in the input data frame
+#View(Toyota) # Invoke a spreadsheet-style data viewer within RStudio
+summary(Toyota) # Produce result summaries of the results of various model fitting functions
+
+pillar::glimpse(Toyota) # This makes it possible to see every column in a data frame by showing as much data as possible
+
+t(t(sapply(Toyota, function(x) length(unique(x)))))   # Number of unique values in each variable (Anatasia's TP 1 code)
+
+plot_missing(Toyota) # Plots the percentages of missing values
+```
+
+```{r}
+Toyota <- Toyota[,c(3:4,7:9,12,14,17,19,21,25:26,28,30,34,39)] # Keep only the 15 variables started in the Data Overview section (page 245)
+head(Toyota)
+```
+
+```{r,fig.width = 6, fig.height=10}
+# Create a summary statistics table to show metrics, ensuring that missing values are not included
+Summary <- data.frame(mean = sapply(Toyota[,c(1:3, 5:16)], mean,na.rm = T) 
+                ,median = sapply(Toyota[,c(1:3, 5:16)], median,na.rm = T)
+                ,min = sapply(Toyota[,c(1:3, 5:16)], min,na.rm = T)
+                ,max = sapply(Toyota[,c(1:3, 5:16)], max,na.rm = T)
+                ,sd = sapply(Toyota[,c(1:3, 5:16)], sd,na.rm = T))
+colnames(Summary) = c("Mean","Median","Min","Max","Standard Deviation")
+Summary
+```
+```{r}
+# Convert categorical Fuel_Type to dummy variable
+Toyota$Fuel_Type = as.factor(Toyota$Fuel_Type) # Treat Fuel_Type as categorical (R will create dummy variables) (page 245)
+
+dummy <- dummyVars(~.,data = Toyota) # Creates a full set of dummy variables for specified factors
+
+Toyota_Data <- as.data.frame(predict(dummy, newdata = Toyota)) # Creates new dataset with the dummy variables
+
+str(Toyota_Data) # Used for compactly displaying the internal structure of a R object
+```
+
+```{r,fig.width = 6, fig.height = 5}
+
+Toyota_data <- Toyota[,c(1:3,5:16)] # Excluding Fuel_Type for quantitative analysis
+
+ggplot(gather(data = Toyota_data),aes(value)) +
+  geom_histogram(bins = 10, color = "white") + # Creates bin sizing and sets the lines as white
+  facet_wrap(~key,scales = "free") + # Converting the graphs into panels
+  ggtitle("Quantitative Variable Analysis") + # Title name
+  ylab("Count") + xlab("Value") + # Label names
+  theme_classic() # A classic theme, with x and y axis lines and no grid lines
+```
+
+For all three exercises, they utilize the ToyotaCorolla.csv that contains data on used cars within the Netherlands. In that summer of 2004, we can see that there are 1,436 observations and 39 variables pertaining to an individual used car. In the exploratory review, I will analyze different statistical measures as well as gather an overall understanding of how our explanatory variables could impact our response (price). If the reader needs a refresher of the exploratory analysis either in 9.3 or 11.3, please refer to the summary below.
+
+The goal of this exercise is to run a multiple linear regression to predict the price of used cars. There are 1,436 observations and 38 variables that relate to the car specifications. The last variable is price, which makes up the total of 39 values. Between reviewing the first five observations and the statistical summary, it is noticed that we have several variables that are categorical ('Model', 'Color, and 'Fuel_Type'). Since we do not use 'Model' and 'Color', we will only convert 'Fuel_Type' to a factor in order to achieve appropriate levels ('Diesel', 'Petrol', and 'CNG'). Referring to the table with unique values, a majority of our variables are already binary (0 or 1). This means that either the car does or does not have that feature. Other variables other than the categorical variables are an integer and have more unique values. 
+
+Before moving forward, we need to check missing values. Fortunately for this analysis, there are no N/A data points. Since there are 15 attributes that we will focus on for the regression, we only keep those moving forward in our Toyota dataset. 
+
+Within those 15 quantitative variables, the mean, median, min, max, and standard deviation all differ. Price will range from $4,350 to $32,500, and we will need to check which variables are most important. For the variables that are binary, those will range between 0 and 1. Hence, their standard deviation and mean being between those two values.
+
+```{r}
+# Partition data (page 159)
+set.seed(1) #  Set seed for reproducing the partition into 50%, 30%, and 20%. (page 159)
+# Partition data for the training set - 50%
+train.index <- sample(rownames(Toyota), 0.5*dim(Toyota)[1]) 
+train.df <- Toyota[train.index, ]
+
+# Partition data for the validation set - 30%
+valid.index <- sample(setdiff(rownames(Toyota),train.index), 0.3*dim(Toyota)[1])
+valid.df <- Toyota[valid.index, ]
+
+# Partition data for the test set - 20%
+test.index = setdiff(rownames(Toyota), union(train.index, valid.index))
+test.df <- Toyota[test.index, ]
+```
+
+```{r}
+# Initialize normalized training, validation data, complete data frames to originals (page 177)
+train.norm.df = train.df
+valid.norm.df = valid.df
+test.norm.df = test.df
+
+selected.var <- c(1,2,3,5,7,8,10) # Select variables for regression (page 159)
+
+# Use preProcess() from the caret package for the quantitative variables
+norm.values = preProcess(train.df[, selected.var], method=c("center", "scale"))
+
+train.norm.df[, selected.var] = predict(norm.values, train.df[, selected.var]) # Select the quantitative values for prediction for training
+
+valid.norm.df[, selected.var] = predict(norm.values, valid.df[, selected.var]) # Select the quantitative values for prediction for valid
+
+test.norm.df[, selected.var] = predict(norm.values, test.df[, selected.var]) # Select the quantitative values for prediction for test
+
+car.lm <- lm(Price ~ ., data = train.norm.df) #  Create regression. Use . after ~ to include all the remaining columns in train.norm.df as predictors (page 159)
+
+# Use options() to ensure numbers are not displayed in scientific notation (page 159)
+options(scipen = 999)
+summary(car.lm)
+
+```
+
+```{r,fig.width = 8, fig.height = 6}
+# Create matrix for stacked bar chart
+data <- as.matrix(data.frame("Automatic_airco" = c(0.85687), 
+                             "Fuel_TypeDiesel" = c(0.58458),
+                             "Age_08_04" = c(0.54127),
+                             "Fuel_TypePetrol" = c(0.36226)))
+rownames(data) <- c("Variable Importance")
+
+# Create grouped barchart
+barplot(data,                                         
+        col = c("#353436"),
+        beside = TRUE, main = "|Importance Variables|")
+```
+
+First, we fit a multiple linear regression model between the explanatory and response variables. Since the main goal is to predict price for Toyota's used cars, we want to run over analysis over our training set which is 50% of this dataset. There is one categorical variable, 'Fuel_Type,' that we must convert into a dummy variable. Since there is redundant information for two of the three dummy variables. R's 'lm' routine will automatically handle this issue. Therefore, this is why we only see Petrol and Diesel, and not CNG (page 157). Other important points to mention is that the Adjusted R-squared is 88.48. This insinuates that about 90% of the variance of the dependent variables being studied are explained by the variance of the independent variable. F-stat is significant, and therefore, we reject the null hypothesis since α = 0.05. A model is qualitatively good if the Fisher test is significant and the R-squared is big.  Additionally, 'airco' is not statistically significant as its p-vale is above alpha = 0.5. There is not enough evidence, and therefore, we fail to reject the null hypothesis (H0: β0 = 0). But, there are car specifications that are influential due to their highest standardized coefficients. These appear to be the following:   
+
+| Variable        | Coefficient | 
+|-----------------|-------------|
+| Automatic_airco | 0.85687     |
+| Fuel_TypeDiesel | 0.58458     |
+| Age_08_04       | -0.54127    |
+| Fuel_TypePetrol | 0.36226     |  
+Please notice that the bar chart above shows the same values but in absolute terms. Also, we know that our coefficients play a roll in picking the most important variables, but those that have an alpha less than 0.05, would mean that they could be potentially added to the model.
+
+```{r,fig.width = 7, fig.height = 5}
+# Use predict() to make predictions on a new set (page 160)
+car.lm.pred <- predict(car.lm, valid.norm.df)
+
+options(scipen=999) # Use options() to ensure numbers are not displayed in scientific notation (page 159)
+
+# Calculate residuals based off linear regression and valid norm set
+some.residuals <- valid.norm.df$Price[1:10] - car.lm.pred[1:10]
+
+# Create dataset that is seen below within a table format
+data.frame("Predicted" = car.lm.pred[1:10], "Actual" = valid.norm.df$Price[1:10], "Residual" = some.residuals)
+
+options(scipen=999, digits = 3) # Use options() to ensure numbers are not displayed in scientific notation (page 159)
+
+# Use accuracy() to compute common accuracy measures (page 160)
+accuracy(car.lm.pred, valid.norm.df$Price)
+
+
+
+par(mfrow = c(2,2)) # Organizes graphs in a specific order
+plot(car.lm, col = "blue") # Plots the linear regression
+
+```
+
+The table above shows a sample of 10 different used cars by their regression coefficients which predict prices based on the explanatory factors. By using the estimated model, we have achieved measures of predictive accuracy. The mean error is 0.00915 and the RMSE is 0.338. Since we normalized the data, the scales balance between 0 and 1 instead of the actual car prices. There are several residual graphs that can be used to analyze if this model is good. 
+
+With any model, the residuals should assume the following:  
+1. There should be a similar variability about the X-axis at all points, around 0 on the Y -axis  
+2. Check the relationship or patterns  
+3. Check the normality of the errors  
+To ensure this criteria is met, we use the Residuals vs Fitted to check the lack of structure or presence of extreme values. It is important to note the following:  
+- A residual will be considered large if its absolute value exceeds (approximately) 2σ(hat)  
+- When n is large, a residual will be considered large if its absolute value exceeds (approximately) 4σ(hat) (otherwise, too many residues will be considered large!)
+
+All values are weighted evenly in a regression model, including potential outliers. As mentioned above, we need to ensure that the residuals are within our limits. Referring back to the summary(car.lm) output, the model’s residual standard error is 0.3394. If we multiple by ±2, we return our estimate. In this case, let us focus on the upper limit of 0.6788. Visually, we can determine that the points ‘110’, '524', and '111' fall outside that of 0.6788 and would be considered large. There could also be additional outliers that are not labeled too. The residuals seem to be concentrated towards the left side of the graph, even though they are distributed around zero.
+
+To check the normality of the errors (εi) we do a normal Q-Q plot of the residuals. For this graph, we can use the “thickness of a pencil approach.” If we were to put the pencil on the regression line, it is immediately noticed that those same three points that are mentioned as outliers above, fall outside of that pencil. If we do not consider those extreme values, the Q-Q plot seems to be normally distributed minus the departures on both of the tail parts.
+
+Below shows the frequency at which the validation set has model errors. The residuals are primarily between ±0.5. In addition, the histogram is roughly bell-shaped so it is an indication that it is reasonable to assume that the errors have a normal distribution.  
+
+```{r}
+# Plotting histogram of validation errors (page 161)
+all.residuals <- valid.norm.df$Price - car.lm.pred
+
+hist(all.residuals, breaks = 20, xlab = "Residuals", main = "Residuals vs Frequency") # Creates histogram of residual frequencies
+```
+
+The next analysis will discuss the exhaustive method for reducing predictors. 
+```{r, message=FALSE, warning=FALSE}
+# Use regsubsets() in package leaps to run an exhaustive search.
+# Unlike with lm, categorical predictors must be turned into dummies manually.
+
+# Create dummies for fuel type
+Fuel_Type <- as.data.frame(model.matrix(~ 0 + Fuel_Type, data=train.df))
+
+# Replace Fuel_Type column with 2 dummies
+train.df <- cbind(train.df[,-4], Fuel_Type[,])
+head(train.df)
+
+# Use regsubsets to get the response versus explanatory variables to calculate the various metrics below
+search <- regsubsets(Price ~ ., data = train.df, nbest = 1, nvmax = dim(train.df)[2], method = "exhaustive")
+
+sum <- summary(search)
+
+# show models
+sum$which
+
+# show metrics
+sum$rsq
+sum$adjr2
+sum$cp
+
+```
+
+With the exhaustive search, there are two components that will help the analyst determine which predictors should be used in the model. The first is the R-squared adjusted that accounts for the predictors used. Since you want the model to have the highest R-squared prior to it plateauing, the best model appears to be the one labeled 15. That means that it includes all variables but Airco which is seen as not statistically significant. The second criterion is the Mallow's Cp. This assumes that the full model is unbiased and we can show that be examining if the Cp is near p + 1. The Cp shows that using all of the predictors is good since 16.0 is the smallest value. 
+
+Here, we code for the stepwise regression using the backwards method to reduce predictors. These next three analyses are considered the iterative approach.
+```{r}
+# Use step() to run stepwise regression (page 167)
+# Set directions = to either "backward", "forward", or "both".
+car.lm.step.back <- step(car.lm, direction = "backward")
+
+summary(car.lm.step.back)
+
+car.lm.step.pred.back <- predict(car.lm.step.back, valid.norm.df) # Used to predict the values based on the input data
+accuracy(car.lm.step.pred.back, valid.norm.df$Price) # Number of correct predictions created
+```
+
+For the backwards stepwise, we start with all predictors and then at each step, eliminate the least useful predictor. We will consider what the exhaustive method mentioned in the book by utilizing the Akaike Information Criterion (AIC) which 'measures the goodness of fit of a model, but also includes a penalty that is a function of the number of parameters in the model' (page 163). Again, we notice that Airco is not significant as it has a p-value larger than 0.05. The top most important variables are Age_08_04, Automatic_airco, KM and, HP as their AIC's are as it has the lowest AIC which offers the best fit.
+
+This time, we will go in the opposite direction and show how the forward selection will reduce the car predictors.  
+```{r}
+# Use step() to run stepwise regression (page 167) and from the Errata
+# Set directions = to either "backward", "forward", or "both".
+# create model with no predictors
+car.lm.null <- lm(Price~1, data = train.norm.df)
+
+# use step() to run forward regression.
+car.lm.step <- step(car.lm.null, scope=list(lower=car.lm.null, upper=car.lm), direction = "forward")
+
+summary(car.lm.step)  
+
+car.lm.step.pred <- predict(car.lm.step, valid.norm.df) # Used to predict the values based on the input data
+accuracy(car.lm.step.pred, valid.norm.df$Price) # Number of correct predictions created
+```
+
+For the forward selection, the results are quite similar to what was seen in the backwards. Inside of "removing" variables, we simily would add. We see that the most important variables are Automatic_airco, HP, KM, and Powered_Windows. Airco continues to be not significant as its p-value is above alpha = 0.5.
+
+The last stepwise includes the direction of 'both' which produces the same results as the other two iterative methods above.
+```{r}
+# Use step() to run stepwise regression (page 167)
+# Set directions = to either "backward", "forward", or "both".
+car.lm.step.both <- step(car.lm, direction = "both")
+
+summary(car.lm.step.both)
+
+car.lm.step.pred.both <- predict(car.lm.step.both, valid.norm.df)
+# Used to predict the values based on the input data
+accuracy(car.lm.step.pred.both, valid.norm.df$Price) # Number of correct predictions created
+```
+
+The overall conclusion of this regression analysis is that the exhaustive and iterative approaches produce the same results. In all situations, there is one variable (Airco) that is not significant while all other variables are important for our analysis. The RMSE and ME stays consistent throughout these various methods. Please note that these are some ways to look at the performance of the model. We choose our variables based on their p-values and coefficients since the exhaustive and iterative methods do not show critical enough differences. 
